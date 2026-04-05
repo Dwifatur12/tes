@@ -6,7 +6,7 @@ import {
   Loader2, Download, Printer, Edit, Trash2, Plus, UserPlus, 
   FileSpreadsheet, MessageCircle, Moon, Sun, ChevronRight, Activity,
   LayoutDashboard, Database, BarChart3, Settings, Wand2, Eye, EyeOff, MapPinOff,
-  ShieldAlert, HelpCircle
+  ShieldAlert, HelpCircle, AlertTriangle
 } from 'lucide-react';
 
 // ==========================================
@@ -17,13 +17,12 @@ import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged }
 import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, query, writeBatch, setDoc } from 'firebase/firestore';
 
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
-  apiKey: "AIzaSyBeVz1veJfe_9vNw-sZTnEaiBn860pQrFA",
-  authDomain: "aplikasi-absen-2cf3f.firebaseapp.com",
-  projectId: "aplikasi-absen-2cf3f",
-  storageBucket: "aplikasi-absen-2cf3f.firebasestorage.app",
-  messagingSenderId: "783186509092",
-  appId: "1:783186509092:web:9ccb6ed22fdc72c468c7b1",
-  measurementId: "G-S2MYY30NGJ"
+  apiKey: "", 
+  authDomain: "default-app-id.firebaseapp.com",
+  projectId: "default-app-id",
+  storageBucket: "default-app-id.appspot.com",
+  messagingSenderId: "123456789",
+  appId: "1:123456789:web:abcdef"
 };
 
 const app = initializeApp(firebaseConfig);
@@ -399,10 +398,10 @@ function MainDashboard({ currentUser, pegawaiList, allHistory, credentials, show
 
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
             {activeTab === 'absen' && <AbsenView currentUser={currentUser} currentTime={currentTime} allHistory={allHistory} showToast={showToast} appId={appId} db={db} isSynced={isTimeSynced && !timeAnomaly} />}
-            {activeTab === 'riwayat' && <HistoryList history={allHistory.filter(h => h.username === currentUser.rawUsername)} />}
+            {activeTab === 'riwayat' && <HistoryList history={currentUser.role === 'admin' ? allHistory : allHistory.filter(h => h.username === currentUser.rawUsername)} currentUser={currentUser} db={db} appId={appId} showToast={showToast} />}
             {activeTab === 'rekap' && <RekapView allHistory={allHistory} pegawaiList={pegawaiList} />}
             {activeTab === 'analitik' && <AnalitikView allHistory={allHistory} pegawaiList={pegawaiList} />}
-            {activeTab === 'kelola' && <KelolaView pegawaiList={pegawaiList} showToast={showToast} db={db} appId={appId} />}
+            {activeTab === 'kelola' && <KelolaView pegawaiList={pegawaiList} showToast={showToast} db={db} appId={appId} credentials={credentials} />}
           </div>
         </div>
       </main>
@@ -442,10 +441,19 @@ function AbsenView({ currentUser, currentTime, allHistory, showToast, appId, db,
   const [absenType, setAbsenType] = useState('Masuk');
   const [loading, setLoading] = useState(false);
   const [isCameraActive, setIsCameraActive] = useState(false); 
+  const [isTrackingLocation, setIsTrackingLocation] = useState(false); // State untuk Real-time GPS
+
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const watchIdRef = useRef(null); // Ref untuk GPS tracker
 
-  useEffect(() => { return () => stopCamera(); }, []);
+  // Bersihkan kamera & gps jika pengguna pindah halaman
+  useEffect(() => { 
+    return () => {
+      stopCamera(); 
+      if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
+    };
+  }, []);
 
   const startCamera = async () => {
     try {
@@ -495,21 +503,44 @@ function AbsenView({ currentUser, currentTime, allHistory, showToast, appId, db,
     }, 2000);
   };
 
-  const handleGetLocation = () => {
-    if (!navigator.geolocation) return showToast("GPS tidak didukung", "error");
-    navigator.geolocation.getCurrentPosition(
+  // Logika GPS Real-time (Diperbarui)
+  const toggleLocationTracking = () => {
+    if (!navigator.geolocation) return showToast("GPS tidak didukung oleh perangkat", "error");
+
+    if (isTrackingLocation) {
+      // Hentikan pelacakan
+      if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
+      setIsTrackingLocation(false);
+      showToast("Pelacakan GPS dihentikan");
+      return;
+    }
+
+    // Mulai pelacakan
+    showToast("Memulai pelacakan lokasi real-time...");
+    setIsTrackingLocation(true);
+    watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
         const { latitude, longitude } = pos.coords;
         setLocation({ lat: latitude, lng: longitude });
         setDist(getDistanceInKm(latitude, longitude, TARGET_LAT, TARGET_LNG));
       },
-      (err) => showToast("Sinyal GPS Lemah (Cek Pengaturan Lokasi)", "error")
+      (err) => {
+        showToast("Sinyal GPS Lemah, pastikan pengaturan lokasi aktif", "error");
+        setIsTrackingLocation(false);
+        if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
+      },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
     );
   };
 
   const submitAbsen = async () => {
     if (!auth.currentUser) return showToast("Sesi habis, harap login ulang", "error");
     if (!isSynced) return showToast("Waktu perangkat tidak valid", "error");
+
+    // FITUR KONFIRMASI ABSENSI
+    if (!window.confirm(`KONFIRMASI ABSENSI:\n\nApakah Anda yakin ingin mengirim laporan [${absenType}] sekarang?\n\nPastikan foto wajah dan titik lokasi Anda sudah akurat.`)) {
+      return;
+    }
 
     if (absenType === 'Sakit') {
       const currentMonth = currentTime.getMonth();
@@ -535,7 +566,8 @@ function AbsenView({ currentUser, currentTime, allHistory, showToast, appId, db,
 
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'absensi'), data);
       showToast(`Presensi ${absenType} Berhasil Disimpan!`);
-      setPhoto(null); startCamera();
+      setPhoto(null); 
+      startCamera(); // Restart mode kamera setelah absen
     } catch (e) { showToast("Gagal menyimpan data ke server", "error"); }
     finally { setLoading(false); }
   };
@@ -548,8 +580,10 @@ function AbsenView({ currentUser, currentTime, allHistory, showToast, appId, db,
         <div className="aspect-[3/4] md:aspect-video bg-slate-900 rounded-[2rem] overflow-hidden relative border-4 border-slate-200 dark:border-slate-800 shadow-inner">
           {!photo ? (
             <>
+              {/* Kamera Aktif */}
               <video ref={videoRef} autoPlay playsInline muted className={`w-full h-full object-cover ${isCameraActive ? 'block' : 'hidden'}`} />
               
+              {/* LAYAR SIAGA (Pencegah Bug Restart Browser HP) */}
               {!isCameraActive && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/95 z-10 p-6 text-center">
                   <Camera size={40} className="text-slate-500 mb-4" />
@@ -574,22 +608,45 @@ function AbsenView({ currentUser, currentTime, allHistory, showToast, appId, db,
 
       <div className="space-y-6">
         <div className="glass-card p-6 md:p-8 rounded-[2.5rem] shadow-xl">
-          <h3 className="text-[10px] font-black uppercase text-slate-700 dark:text-slate-500 mb-6 flex items-center gap-2"><MapPin size={14} className="text-blue-600"/> Koordinat Personel GPS</h3>
-          <div className="aspect-video bg-slate-900 rounded-[2rem] flex flex-col items-center justify-center border-4 border-slate-200 dark:border-slate-800 shadow-inner">
+          <h3 className="text-[10px] font-black uppercase text-slate-700 dark:text-slate-500 mb-6 flex items-center gap-2">
+            <MapPin size={14} className={isTrackingLocation ? "text-emerald-500 animate-pulse" : "text-blue-600"}/> 
+            Koordinat Personel GPS {isTrackingLocation && "(LIVE)"}
+          </h3>
+          <div className="aspect-video bg-slate-900 rounded-[2rem] flex flex-col items-center justify-center border-4 border-slate-200 dark:border-slate-800 shadow-inner relative overflow-hidden">
             {location ? (
-              <div className="text-center animate-in zoom-in"><Activity size={32} className="text-blue-500 animate-pulse mx-auto mb-3"/><p className="text-white font-black text-xl tracking-tight">Sinyal GPS Terkunci</p><p className="text-[9px] font-bold text-slate-400 mt-2 uppercase">Akurasi Jarak: {dist?.toFixed(2)} KM</p></div>
+              <div className="text-center animate-in zoom-in">
+                <Activity size={32} className={`${isTrackingLocation ? 'text-emerald-500 animate-bounce' : 'text-blue-500'} mx-auto mb-3`}/>
+                <p className="text-white font-black text-xl tracking-tight">Sinyal GPS Terkunci</p>
+                <p className="text-[9px] font-bold text-slate-400 mt-2 uppercase tracking-widest">Jarak: {dist?.toFixed(2)} KM</p>
+              </div>
             ) : (
-              <div className="text-center p-6 opacity-40"><MapPinOff size={40} className="text-rose-600 mx-auto mb-4"/><p className="text-rose-600 text-[10px] font-black uppercase tracking-widest">GPS Belum Terdeteksi</p></div>
+              <div className="text-center p-6 opacity-40">
+                <MapPinOff size={40} className="text-rose-600 mx-auto mb-4"/>
+                <p className="text-rose-600 text-[10px] font-black uppercase tracking-widest">GPS Belum Terdeteksi</p>
+              </div>
+            )}
+            
+            {/* Animasi Live Tracking */}
+            {isTrackingLocation && (
+              <div className="absolute top-4 right-4 flex items-center gap-2">
+                <span className="relative flex h-3 w-3"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span></span>
+                <span className="text-[7px] font-black uppercase tracking-widest text-emerald-500">Live</span>
+              </div>
             )}
           </div>
-          <button onClick={handleGetLocation} className="w-full mt-6 py-4 glass-card bg-white dark:bg-slate-800 rounded-2xl font-black text-[9px] uppercase dark:text-white btn-3d transition-transform hover:scale-[1.02]">Segarkan Lokasi Terkini</button>
+          <button 
+            onClick={toggleLocationTracking} 
+            className={`w-full mt-6 py-4 glass-card rounded-2xl font-black text-[9px] uppercase btn-3d transition-all shadow-md ${isTrackingLocation ? 'bg-slate-100 text-rose-600 dark:bg-slate-950 dark:text-rose-500' : 'bg-white text-slate-900 dark:bg-slate-800 dark:text-white'}`}
+          >
+            {isTrackingLocation ? 'Hentikan Lacak GPS' : 'Mulai Lacak GPS Real-Time'}
+          </button>
         </div>
 
         <div className="glass-card p-6 md:p-8 rounded-[2.5rem] flex flex-col md:flex-row gap-4 items-center border border-blue-500/10 shadow-lg">
           <select value={absenType} onChange={e => setAbsenType(e.target.value)} className="w-full md:flex-1 p-4 bg-slate-100 dark:bg-slate-900 border-none rounded-2xl font-black text-xs text-center outline-none cursor-pointer text-slate-950 dark:text-white shadow-inner">
             {['Masuk', 'Keluar', 'Lepas Piket', 'Sakit', 'Cuti', 'Dinas Luar'].map(t => <option key={t} value={t}>{t}</option>)}
           </select>
-          <button disabled={!photo || loading || !isSynced} onClick={submitAbsen} className="w-full md:w-auto px-10 py-5 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] btn-3d shadow-xl shadow-blue-600/30 disabled:opacity-30 disabled:scale-100 transition-all active:scale-95">
+          <button disabled={!photo || loading || !isSynced || !location} onClick={submitAbsen} className="w-full md:w-auto px-10 py-5 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] btn-3d shadow-xl shadow-blue-600/30 disabled:opacity-30 disabled:scale-100 transition-all active:scale-95">
             {loading ? <Loader2 className="animate-spin mx-auto" size={18}/> : `Lapor ${absenType}`}
           </button>
         </div>
@@ -623,7 +680,9 @@ function RekapView({ allHistory, pegawaiList }) {
     <div className="glass-card rounded-[3rem] overflow-hidden shadow-2xl">
       <div className="p-8 md:p-10 border-b border-slate-100 dark:border-slate-800 flex flex-col md:flex-row justify-between items-center gap-6">
         <div><h2 className="text-2xl font-black text-slate-950 dark:text-white tabular-nums tracking-tighter leading-none">{today}</h2><p className="text-[9px] font-black uppercase text-slate-700 dark:text-slate-500 mt-2">Daftar Kehadiran Personel (Verifikasi Server WITA)</p></div>
-        <div className="flex gap-3 w-full md:w-auto"><button className="flex-1 px-6 py-4 bg-emerald-600 text-white rounded-2xl font-black text-[9px] uppercase btn-3d"><Download size={14} className="inline mr-2"/> CSV</button><button onClick={() => window.print()} className="flex-1 px-6 py-4 bg-slate-900 dark:bg-slate-800 text-white rounded-2xl font-black text-[9px] uppercase btn-3d"><Printer size={14} className="inline mr-2"/> PDF</button></div>
+        <div className="flex gap-3 w-full md:w-auto">
+          <button onClick={() => window.print()} className="flex-1 px-6 py-4 bg-slate-900 dark:bg-slate-800 text-white rounded-2xl font-black text-[9px] uppercase btn-3d flex items-center justify-center"><Printer size={14} className="mr-2"/> Cetak PDF</button>
+        </div>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-left min-w-[800px]">
@@ -658,7 +717,7 @@ function RekapView({ allHistory, pegawaiList }) {
 }
 
 // ==========================================
-// VIEW: ANALITIK
+// VIEW: ANALITIK 
 // ==========================================
 function AnalitikView({ allHistory, pegawaiList }) {
   const today = formatDateIndo(new Date());
@@ -667,23 +726,55 @@ function AnalitikView({ allHistory, pegawaiList }) {
   const total = pegawaiList.length || 36;
   const pct = Math.round((hadir / total) * 100);
 
+  const bidangs = ["KALAPAS", "Tata Usaha", "KPLP", "Adm Kamtib", "Binadikgiatja"];
+  const chartData = bidangs.map(b => {
+    const ps = pegawaiList.filter(p => p.bidang === b);
+    const hs = ps.filter(p => todayLogs.some(l => l.username === p.nip)).length;
+    const persentase = ps.length > 0 ? Math.round((hs / ps.length) * 100) : 0;
+    return { bidang: b, hadir: hs, total: ps.length, persentase };
+  });
+
   return (
     <div className="space-y-8">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {[{ l: 'Kehadiran', v: hadir, c: 'text-emerald-600' }, { l: 'Absensi', v: total-hadir, c: 'text-rose-600' }, { l: 'Persentase', v: pct+'%', c: 'text-blue-600' }].map(s => (
+        {[{ l: 'Kehadiran Total', v: hadir, c: 'text-emerald-600' }, { l: 'Absensi/Kosong', v: total-hadir, c: 'text-rose-600' }, { l: 'Persentase', v: pct+'%', c: 'text-blue-600' }].map(s => (
           <div key={s.l} className="glass-card p-10 rounded-[2.5rem] text-center shadow-xl"><p className="text-[9px] font-black uppercase text-slate-700 dark:text-slate-500 mb-4">{s.l}</p><p className={`text-6xl font-black ${s.c}`}>{s.v}</p></div>
         ))}
+      </div>
+
+      <div className="glass-card p-8 md:p-10 rounded-[3rem] shadow-2xl">
+        <h3 className="text-[10px] font-black uppercase text-slate-700 dark:text-slate-500 mb-8 tracking-widest flex items-center gap-2">
+          <BarChart3 size={16} className="text-blue-600"/> Grafik Infografis Kehadiran Per Bidang (Hari Ini)
+        </h3>
+        <div className="space-y-6">
+          {chartData.map((data, idx) => (
+            <div key={idx} className="relative">
+              <div className="flex justify-between font-black uppercase text-[10px] mb-2 text-slate-950 dark:text-white">
+                <span>{data.bidang}</span>
+                <span className="text-blue-600">{data.hadir} dari {data.total} Personel ({data.persentase}%)</span>
+              </div>
+              <div className="h-4 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden shadow-inner flex">
+                <div 
+                  className="h-full bg-blue-600 transition-all duration-1000 ease-out flex items-center justify-end pr-2" 
+                  style={{ width: `${data.persentase}%` }}
+                >
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
 }
 
 // ==========================================
-// VIEW: KELOLA PEGAWAI (DATABASE MASTER)
+// VIEW: KELOLA PEGAWAI 
 // ==========================================
-function KelolaView({ pegawaiList, showToast, db, appId }) {
+function KelolaView({ pegawaiList, showToast, db, appId, credentials }) {
   const [loading, setLoading] = useState(false);
   const [previewData, setPreviewData] = useState(null);
+  const [targetPassUser, setTargetPassUser] = useState(null); 
 
   const dataAwal = [
     { nip: "198007232000121001", nama: "M Arfandy, A.Md. IP., S.H., M.H.", bidang: "KALAPAS", jabatan: "Kepala Lembaga Pemasyarakatan" },
@@ -788,10 +879,16 @@ function KelolaView({ pegawaiList, showToast, db, appId }) {
         {pegawaiList.map(p => (
           <div key={p.nip} className="p-6 glass-card rounded-3xl flex justify-between items-center transition-transform hover:scale-[1.01]">
             <div className="text-left"><p className="font-black text-sm text-slate-950 dark:text-white leading-none">{p.nama}</p><p className="text-[9px] font-bold text-slate-600 dark:text-slate-400 mt-2 uppercase">{p.nip} | <span className="text-blue-600">{p.bidang}</span></p></div>
-            <div className="flex gap-2 shrink-0"><button className="p-3 bg-blue-50 dark:bg-blue-900/20 text-blue-600 rounded-xl"><Edit size={14}/></button><button onClick={async () => { if(window.confirm(`Hapus ${p.nama}?`)) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pegawai', p.id)); }} className="p-3 bg-rose-50 dark:bg-rose-900/20 text-rose-600 rounded-xl"><Trash2 size={14}/></button></div>
+            <div className="flex gap-2 shrink-0">
+              <button onClick={() => setTargetPassUser(p)} className="p-3 bg-amber-50 dark:bg-amber-900/20 text-amber-600 rounded-xl" title="Lihat/Ubah Sandi"><Key size={14}/></button>
+              <button className="p-3 bg-blue-50 dark:bg-blue-900/20 text-blue-600 rounded-xl"><Edit size={14}/></button>
+              <button onClick={async () => { if(window.confirm(`Hapus ${p.nama}?`)) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pegawai', p.id)); }} className="p-3 bg-rose-50 dark:bg-rose-900/20 text-rose-600 rounded-xl"><Trash2 size={14}/></button>
+            </div>
           </div>
         ))}
       </div>
+      
+      {/* Modal Sinkronisasi */}
       {previewData && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md">
           <div className="glass-card w-full max-w-2xl max-h-[80vh] rounded-[3rem] overflow-hidden flex flex-col border border-white/10">
@@ -805,12 +902,65 @@ function KelolaView({ pegawaiList, showToast, db, appId }) {
           </div>
         </div>
       )}
+
+      {/* Modal Ubah Sandi Pegawai oleh Admin */}
+      {targetPassUser && (
+        <AdminEditPasswordModal targetUser={targetPassUser} credentials={credentials} db={db} appId={appId} onClose={() => setTargetPassUser(null)} showToast={showToast} />
+      )}
+    </div>
+  );
+}
+
+// Modal Khusus Admin Mengubah Sandi Pegawai
+function AdminEditPasswordModal({ targetUser, credentials, db, appId, onClose, showToast }) {
+  const cred = credentials.find(c => c.username === targetUser.nip);
+  const currentPass = cred?.password || '123456';
+  
+  const [newPass, setNewPass] = useState(currentPass);
+  const [showPass, setShowPass] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const handleUpdate = async (e) => {
+    e.preventDefault();
+    if (!newPass) return showToast("Sandi tidak boleh kosong", "error");
+
+    // FITUR KONFIRMASI (ADMIN UBAH SANDI)
+    if (!window.confirm(`KONFIRMASI ADMIN:\n\nAnda yakin ingin mengubah kata sandi untuk akun milik:\n${targetUser.nama}?`)) {
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const ref = doc(db, 'artifacts', appId, 'public', 'data', 'credentials', targetUser.nip);
+      await setDoc(ref, { username: targetUser.nip, password: newPass, updatedAt: Date.now() });
+      showToast(`Sandi untuk ${targetUser.nama} berhasil diperbarui!`); 
+      onClose();
+    } catch (err) { showToast("Gagal memperbarui sandi", "error"); } 
+    finally { setLoading(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md">
+      <div className="glass-card p-10 rounded-[3rem] max-w-sm w-full text-center border border-white/10 shadow-2xl animate-in zoom-in">
+        <Lock size={40} className="text-amber-500 mx-auto mb-4" />
+        <h2 className="text-xl font-black mb-1 text-slate-950 dark:text-white">Akses Admin</h2>
+        <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-8 leading-relaxed">Kelola Sandi: {targetUser.nama}</p>
+        
+        <form onSubmit={handleUpdate} className="space-y-4 text-left">
+          <div className="relative">
+            <input type={showPass ? "text" : "password"} value={newPass} onChange={(e) => setNewPass(e.target.value)} className="w-full pl-5 pr-12 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs outline-none focus:ring-2 focus:ring-amber-500 font-bold dark:text-white shadow-inner text-slate-950" />
+            <button type="button" onClick={() => setShowPass(!showPass)} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-amber-500">{showPass ? <EyeOff size={16}/> : <Eye size={16}/>}</button>
+          </div>
+          <button type="submit" disabled={loading} className="w-full py-5 bg-amber-500 text-white rounded-2xl font-black uppercase text-[10px] mt-4 shadow-xl shadow-amber-500/30 hover:scale-[1.02] transition-transform">{loading ? 'Menyimpan...' : 'Simpan Sandi Baru'}</button>
+          <button type="button" onClick={onClose} className="w-full py-2 text-slate-600 text-[9px] font-black uppercase mt-2">Batal</button>
+        </form>
+      </div>
     </div>
   );
 }
 
 // ==========================================
-// MODAL: UBAH SANDI 
+// MODAL: UBAH SANDI (PRIBADI)
 // ==========================================
 function PasswordModal({ currentUser, credentials, db, appId, onClose, showToast }) {
   const [oldPass, setOldPass] = useState('');
@@ -827,6 +977,12 @@ function PasswordModal({ currentUser, credentials, db, appId, onClose, showToast
     const cred = credentials.find(c => c.username === currentUser.rawUsername);
     const exp = cred?.password || (currentUser.rawUsername === '2001' ? 'november' : '123456');
     if (oldPass !== exp) return showToast("Sandi lama yang dimasukkan salah", "error");
+
+    // FITUR KONFIRMASI UBAH SANDI
+    if (!window.confirm("PENGATURAN KEAMANAN:\n\nApakah Anda yakin ingin menyimpan kata sandi baru Anda?")) {
+      return;
+    }
+
     setLoading(true);
     try {
       const ref = doc(db, 'artifacts', appId, 'public', 'data', 'credentials', currentUser.rawUsername);
@@ -866,21 +1022,122 @@ function PasswordModal({ currentUser, credentials, db, appId, onClose, showToast
 }
 
 // ==========================================
-// RIWAYAT LIST
+// VIEW: RIWAYAT LIST
 // ==========================================
-function HistoryList({ history }) {
+function HistoryList({ history, currentUser, db, appId, showToast }) {
+  const [editingLog, setEditingLog] = useState(null);
+
+  const handleDelete = async (id) => {
+    if (window.confirm("Peringatan Admin: Yakin ingin MENGHAPUS log absensi ini?")) {
+      try {
+        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'absensi', id));
+        showToast("Log absensi berhasil dihapus!", "success");
+      } catch (err) {
+        showToast("Gagal menghapus log", "error");
+      }
+    }
+  };
+
   if (history.length === 0) return <div className="p-20 text-center opacity-30"><History size={60} className="mx-auto mb-6 text-slate-400" /><p className="text-[9px] font-black uppercase tracking-widest leading-loose text-slate-600">Log harian kosong</p></div>;
+  
+  // Admin bisa melihat lebih banyak riwayat
+  const displayLimit = currentUser.role === 'admin' ? 100 : 20;
+
   return (
     <div className="space-y-4">
-      {history.slice(0, 20).map(item => (
+      {currentUser.role === 'admin' && (
+        <div className="p-4 bg-amber-100 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-700/50 rounded-2xl flex items-center gap-3 mb-6">
+          <AlertTriangle size={20} className="text-amber-600 dark:text-amber-500" />
+          <p className="text-[10px] font-bold text-amber-800 dark:text-amber-400 uppercase tracking-widest">Akses Admin: Menampilkan seluruh riwayat dan izinkan pengeditan</p>
+        </div>
+      )}
+
+      {history.slice(0, displayLimit).map(item => (
         <div key={item.id} className="p-5 glass-card rounded-2xl flex items-center justify-between border border-white/5 transition-transform hover:translate-x-1">
           <div className="flex items-center gap-5">
-            <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-black ${item.type === 'Masuk' ? 'bg-emerald-500/10 text-emerald-600' : 'bg-rose-500/10 text-rose-600'}`}>{item.type === 'Masuk' ? <LogIn size={20}/> : <LogOut size={20}/>}</div>
-            <div className="text-left"><p className="font-black text-sm text-slate-950 dark:text-white leading-none">{item.displayName}</p><p className="text-[9px] font-bold text-slate-600 dark:text-slate-400 mt-2 uppercase flex items-center gap-2 leading-relaxed"><span className="text-blue-600 font-black">{item.timeStr} WITA</span> | {item.dateStr}</p></div>
+            <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-black shrink-0 ${item.type === 'Masuk' ? 'bg-emerald-500/10 text-emerald-600' : (item.type === 'Sakit' || item.type === 'Cuti' ? 'bg-amber-500/10 text-amber-600' : 'bg-rose-500/10 text-rose-600')}`}>
+              {item.type === 'Masuk' ? <LogIn size={20}/> : (item.type === 'Keluar' ? <LogOut size={20}/> : <FileText size={20}/>)}
+            </div>
+            <div className="text-left">
+              <p className="font-black text-sm text-slate-950 dark:text-white leading-none">{item.displayName}</p>
+              <p className="text-[9px] font-bold text-slate-600 dark:text-slate-400 mt-2 uppercase flex items-center gap-2 leading-relaxed">
+                <span className="text-blue-600 font-black">{item.timeStr} WITA</span> | {item.dateStr} | {item.type}
+              </p>
+            </div>
           </div>
-          {item.photoStr && <img src={item.photoStr} className="w-12 h-12 rounded-xl object-cover border border-slate-200 dark:border-slate-800 shadow-md" alt="Log" />}
+          <div className="flex items-center gap-3 shrink-0">
+            {currentUser.role === 'admin' && (
+              <div className="flex gap-2 mr-2">
+                <button onClick={() => setEditingLog(item)} className="p-2 bg-blue-50 dark:bg-blue-900/20 text-blue-600 rounded-lg" title="Edit Absensi"><Edit size={14}/></button>
+                <button onClick={() => handleDelete(item.id)} className="p-2 bg-rose-50 dark:bg-rose-900/20 text-rose-600 rounded-lg" title="Hapus Absensi"><Trash2 size={14}/></button>
+              </div>
+            )}
+            {item.photoStr ? <img src={item.photoStr} className="w-12 h-12 rounded-xl object-cover border border-slate-200 dark:border-slate-800 shadow-md" alt="Log" /> : <div className="w-12 h-12 rounded-xl bg-slate-200 dark:bg-slate-800 opacity-50 flex items-center justify-center"><User size={16} className="text-slate-400"/></div>}
+          </div>
         </div>
       ))}
+
+      {editingLog && (
+        <AdminEditHistoryModal 
+          log={editingLog} 
+          db={db} 
+          appId={appId} 
+          onClose={() => setEditingLog(null)} 
+          showToast={showToast} 
+        />
+      )}
+    </div>
+  );
+}
+
+// Modal Khusus Admin Mengubah Riwayat Absensi
+function AdminEditHistoryModal({ log, db, appId, onClose, showToast }) {
+  const [type, setType] = useState(log.type);
+  const [timeStr, setTimeStr] = useState(log.timeStr);
+  const [dateStr, setDateStr] = useState(log.dateStr);
+  const [loading, setLoading] = useState(false);
+
+  const handleUpdate = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const ref = doc(db, 'artifacts', appId, 'public', 'data', 'absensi', log.id);
+      await updateDoc(ref, { type, timeStr, dateStr });
+      showToast("Data riwayat absensi berhasil diubah!");
+      onClose();
+    } catch (err) {
+      showToast("Gagal mengubah data absensi", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md">
+      <div className="glass-card p-10 rounded-[3rem] max-w-sm w-full text-center border border-white/10 shadow-2xl animate-in zoom-in">
+        <Edit size={40} className="text-blue-500 mx-auto mb-4" />
+        <h2 className="text-xl font-black mb-1 text-slate-950 dark:text-white">Edit Absensi</h2>
+        <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-6 leading-relaxed">Personel: {log.displayName}</p>
+        
+        <form onSubmit={handleUpdate} className="space-y-4 text-left">
+          <div className="space-y-1">
+            <label className="text-[8px] font-black uppercase text-slate-500 ml-2">Status</label>
+            <select value={type} onChange={(e) => setType(e.target.value)} className="w-full p-4 bg-slate-100 dark:bg-slate-900 border-none rounded-2xl font-bold text-xs outline-none text-slate-950 dark:text-white shadow-inner">
+              {['Masuk', 'Keluar', 'Lepas Piket', 'Sakit', 'Cuti', 'Dinas Luar'].map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          <div className="space-y-1">
+            <label className="text-[8px] font-black uppercase text-slate-500 ml-2">Jam (WITA)</label>
+            <input type="text" value={timeStr} onChange={(e) => setTimeStr(e.target.value)} className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs outline-none font-bold dark:text-white shadow-inner text-slate-950" />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[8px] font-black uppercase text-slate-500 ml-2">Tanggal (Format Indo)</label>
+            <input type="text" value={dateStr} onChange={(e) => setDateStr(e.target.value)} className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs outline-none font-bold dark:text-white shadow-inner text-slate-950" />
+          </div>
+          <button type="submit" disabled={loading} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] mt-4 shadow-xl shadow-blue-600/30 hover:scale-[1.02] transition-transform">{loading ? 'Menyimpan...' : 'Simpan Perubahan'}</button>
+          <button type="button" onClick={onClose} className="w-full py-2 text-slate-600 text-[9px] font-black uppercase mt-2">Batal</button>
+        </form>
+      </div>
     </div>
   );
 }
