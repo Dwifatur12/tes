@@ -6,7 +6,8 @@ import {
   Loader2, Download, Printer, Edit, Trash2, Plus, UserPlus, 
   FileSpreadsheet, MessageCircle, Moon, Sun, ChevronRight, Activity,
   LayoutDashboard, Database, BarChart3, Settings, Wand2, Eye, EyeOff, MapPinOff,
-  ShieldAlert, HelpCircle, AlertTriangle, MessageSquare, BellRing, Upload, Megaphone
+  ShieldAlert, HelpCircle, AlertTriangle, MessageSquare, BellRing, Upload, Megaphone,
+  Trophy, ThumbsDown, CalendarDays
 } from 'lucide-react';
 
 // ==========================================
@@ -33,7 +34,7 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'lapas-kalabahi-v2';
 
 const TARGET_LAT = -8.219515;
 const TARGET_LNG = 124.513346;
-const PETA_DARURAT_URL = "https://maps.app.goo.gl/kndHbFguLbkCowxf8"; // Link Maps Darurat
+const PETA_DARURAT_URL = "https://maps.app.goo.gl/kndHbFguLbkCowxf8";
 
 function getDistanceInKm(lat1, lon1, lat2, lon2) {
   if (!lat1 || !lon1) return null;
@@ -65,6 +66,11 @@ const formatDateIndo = (date) => {
   }).format(date);
 };
 
+// Fungsi Bantuan Hitung Selisih Waktu (Menit)
+const getMinutesDiff = (limitH, limitM, actualH, actualM) => {
+  return (actualH * 60 + actualM) - (limitH * 60 + limitM);
+};
+
 // ==========================================
 // KOMPONEN UTAMA
 // ==========================================
@@ -86,11 +92,11 @@ export default function App() {
   const [pegawaiList, setPegawaiList] = useState([]);
   const [credentials, setCredentials] = useState([]);
   const [allHistory, setAllHistory] = useState([]);
+  const [passRequests, setPassRequests] = useState([]); // State untuk Lupa Password
   
-  // State Pengumuman (Broadcast)
   const [pengumumanData, setPengumumanData] = useState({ 
     id: null, 
-    text: "Selamat Datang di SATU-KALA (Sistem Absensi Terpadu Lapas Kalabahi). Mari tingkatkan terus kedisiplinan dan kinerja kita bersama. Selamat bertugas!" 
+    text: "Selamat Datang di SATU-LAKAL (Sistem Absensi Terpadu Lapas Kalabahi). Mari tingkatkan terus kedisiplinan dan kinerja kita bersama. Selamat bertugas!" 
   });
 
   const showToast = (message, type = 'success') => {
@@ -106,20 +112,12 @@ export default function App() {
       ];
       try {
         const fastestResponse = await Promise.any(
-          providers.map(url => 
-            fetch(url, { cache: 'no-cache' }).then(res => {
-              if (!res.ok) throw new Error();
-              return res.json();
-            })
-          )
+          providers.map(url => fetch(url, { cache: 'no-cache' }).then(res => { if (!res.ok) throw new Error(); return res.json(); }))
         );
         const serverDate = new Date(fastestResponse.dateTime || fastestResponse.datetime);
         setSyncRefs({ server: serverDate.getTime(), perf: performance.now() });
-        setIsTimeSynced(true);
-        setTimeAnomaly(false);
-      } catch (err) {
-        setTimeout(syncTime, 10000);
-      }
+        setIsTimeSynced(true); setTimeAnomaly(false);
+      } catch (err) { setTimeout(syncTime, 10000); }
     };
     syncTime();
     const resyncInterval = setInterval(syncTime, 1800000);
@@ -158,10 +156,7 @@ export default function App() {
       } catch (e) { console.error("Auth failed", e); }
     };
     initAuth();
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setFirebaseUser(user);
-      setIsAuthReady(true);
-    });
+    const unsubscribe = onAuthStateChanged(auth, (user) => { setFirebaseUser(user); setIsAuthReady(true); });
     return () => unsubscribe();
   }, []);
 
@@ -173,16 +168,12 @@ export default function App() {
     const unsubCreds = onSnapshot(qCreds, (snap) => setCredentials(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     const qAbsen = collection(db, 'artifacts', appId, 'public', 'data', 'absensi');
     const unsubAbsen = onSnapshot(qAbsen, (snap) => setAllHistory(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => b.timestamp - a.timestamp)));
-    
-    // Subscribe Pengumuman
     const qPengumuman = collection(db, 'artifacts', appId, 'public', 'data', 'pengumuman');
-    const unsubPengumuman = onSnapshot(qPengumuman, (snap) => {
-      if (!snap.empty) {
-        setPengumumanData({ id: snap.docs[0].id, text: snap.docs[0].data().text });
-      }
-    });
+    const unsubPengumuman = onSnapshot(qPengumuman, (snap) => { if (!snap.empty) setPengumumanData({ id: snap.docs[0].id, text: snap.docs[0].data().text }); });
+    const qReqs = collection(db, 'artifacts', appId, 'public', 'data', 'password_requests');
+    const unsubReqs = onSnapshot(qReqs, (snap) => setPassRequests(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
 
-    return () => { unsubPegawai(); unsubCreds(); unsubAbsen(); unsubPengumuman(); };
+    return () => { unsubPegawai(); unsubCreds(); unsubAbsen(); unsubPengumuman(); unsubReqs(); };
   }, [firebaseUser]);
 
   if (!isAuthReady) {
@@ -225,32 +216,16 @@ export default function App() {
             setCurrentUser(u);
             showToast(`Selamat datang, ${u.username}`);
           }} 
-          credentials={credentials} 
-          pegawaiList={pegawaiList} 
-          isDarkMode={isDarkMode} 
-          toggleDarkMode={() => setIsDarkMode(!isDarkMode)} 
-          showToast={showToast}
+          credentials={credentials} pegawaiList={pegawaiList} 
+          isDarkMode={isDarkMode} toggleDarkMode={() => setIsDarkMode(!isDarkMode)} 
+          showToast={showToast} db={db} appId={appId}
         />
       ) : (
         <MainDashboard 
-          currentUser={currentUser} 
-          pegawaiList={pegawaiList}
-          allHistory={allHistory}
-          credentials={credentials}
-          showToast={showToast}
-          isDarkMode={isDarkMode}
-          toggleDarkMode={() => setIsDarkMode(!isDarkMode)}
-          onLogout={() => {
-            localStorage.removeItem('absensiUser');
-            setCurrentUser(null);
-            showToast("Berhasil keluar.");
-          }}
-          appId={appId}
-          db={db}
-          currentTime={currentTime}
-          isTimeSynced={isTimeSynced}
-          timeAnomaly={timeAnomaly}
-          pengumumanData={pengumumanData}
+          currentUser={currentUser} pegawaiList={pegawaiList} allHistory={allHistory} credentials={credentials}
+          passRequests={passRequests} showToast={showToast} isDarkMode={isDarkMode} toggleDarkMode={() => setIsDarkMode(!isDarkMode)}
+          onLogout={() => { localStorage.removeItem('absensiUser'); setCurrentUser(null); showToast("Berhasil keluar."); }}
+          appId={appId} db={db} currentTime={currentTime} isTimeSynced={isTimeSynced} timeAnomaly={timeAnomaly} pengumumanData={pengumumanData}
         />
       )}
     </div>
@@ -258,27 +233,26 @@ export default function App() {
 }
 
 // ==========================================
-// HALAMAN LOGIN 
+// HALAMAN LOGIN & LUPA PASSWORD
 // ==========================================
-function LoginPage({ onLogin, credentials, pegawaiList, isDarkMode, toggleDarkMode, showToast }) {
+function LoginPage({ onLogin, credentials, pegawaiList, isDarkMode, toggleDarkMode, showToast, db, appId }) {
   const [nip, setNip] = useState('');
   const [pass, setPass] = useState('');
   const [showPassword, setShowPassword] = useState(false); 
+  const [showForgotModal, setShowForgotModal] = useState(false);
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!nip || !pass) return showToast("Harap isi NIP dan Kata Sandi", "error");
-    
+    if (!nip || !pass) return showToast("Harap isi NIP dan Password", "error");
     if (nip === '2001' && pass === 'november') return onLogin({ username: 'Admin Lapas', role: 'admin', rawUsername: '2001' });
 
     const cred = credentials.find(c => c.username === nip);
     const expectedPass = cred?.password || '123456'; 
-    
     if (pass === expectedPass) {
       const peg = pegawaiList.find(p => p.nip === nip);
       if (peg) onLogin({ username: peg.nama, role: 'pegawai', rawUsername: nip });
       else showToast("NIP tidak terdaftar dalam sistem", "error");
-    } else showToast("NIP atau Kata Sandi salah", "error");
+    } else showToast("NIP atau Password salah", "error");
   };
 
   return (
@@ -289,49 +263,68 @@ function LoginPage({ onLogin, credentials, pegawaiList, isDarkMode, toggleDarkMo
 
       <div className="glass-card p-10 rounded-[3rem] w-full max-w-sm text-center border border-white/5 shadow-2xl">
         <Shield size={50} className="text-blue-600 mx-auto mb-6" />
-        <h1 className="text-4xl font-black tracking-tighter dark:text-white leading-tight text-slate-950">SATU-KALA</h1>
-        <p className="text-[9px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-400 mt-2 mb-10 leading-relaxed px-4">Sistem Absensi Terpadu Lapas Kalabahi</p>
+        <h1 className="text-4xl font-black tracking-tighter dark:text-white leading-tight text-slate-950">SATU-LAKAL</h1>
+        <p className="text-[9px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-400 mt-2 mb-10 leading-relaxed px-4">(Sistem Absensi Terpadu Lapas Kalabahi)</p>
 
         <form onSubmit={handleSubmit} className="space-y-4 text-left">
           <div className="space-y-1">
             <label className="text-[9px] font-black uppercase tracking-widest text-slate-700 dark:text-slate-500 ml-2">NIP Pegawai</label>
-            <input 
-              type="text" 
-              value={nip} 
-              onChange={e => setNip(e.target.value)} 
-              className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl outline-none focus:border-blue-500 font-bold dark:text-white transition-all text-slate-950 shadow-inner" 
-              placeholder="Masukkan NIP"
-            />
+            <input type="text" value={nip} onChange={e => setNip(e.target.value)} className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl outline-none focus:border-blue-500 font-bold dark:text-white transition-all text-slate-950 shadow-inner" placeholder="Masukkan NIP" />
           </div>
           <div className="space-y-1 relative">
             <div className="flex justify-between items-end">
-              <label className="text-[9px] font-black uppercase tracking-widest text-slate-700 dark:text-slate-500 ml-2">Kata Sandi</label>
+              <label className="text-[9px] font-black uppercase tracking-widest text-slate-700 dark:text-slate-500 ml-2">Password</label>
             </div>
             <div className="relative">
-              <input 
-                type={showPassword ? "text" : "password"} 
-                value={pass} 
-                onChange={e => setPass(e.target.value)} 
-                className="w-full pl-5 pr-12 py-4 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl outline-none focus:border-blue-500 font-bold dark:text-white transition-all text-slate-950 shadow-inner" 
-                placeholder="Masukkan Sandi"
-              />
-              <button 
-                type="button" 
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-500 transition-colors"
-              >
+              <input type={showPassword ? "text" : "password"} value={pass} onChange={e => setPass(e.target.value)} className="w-full pl-5 pr-12 py-4 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl outline-none focus:border-blue-500 font-bold dark:text-white transition-all text-slate-950 shadow-inner" placeholder="Masukkan Password" />
+              <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-500 transition-colors">
                 {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
           </div>
-          <button type="submit" className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest mt-6 btn-3d">
-            Masuk Sekarang
-          </button>
+          <button type="submit" className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest mt-6 btn-3d">Masuk Sekarang</button>
         </form>
         
-        <button onClick={() => showToast("Gunakan NIP dan sandi bawaan (123456) jika belum diubah.", "success")} className="mt-8 text-[9px] font-bold text-slate-500 flex items-center justify-center gap-1 mx-auto hover:text-blue-500 transition-colors uppercase tracking-widest">
-          <HelpCircle size={14}/> Butuh Bantuan?
-        </button>
+        <div className="mt-8 text-[9px] font-bold text-slate-500 flex flex-col items-center justify-center gap-2 mx-auto uppercase tracking-widest">
+          <p className="flex items-center gap-1"><HelpCircle size={14}/> Lupa password / Butuh bantuan?</p>
+          <button onClick={() => setShowForgotModal(true)} className="text-blue-600 dark:text-blue-400 hover:underline">Hubungi Admin / Reset Sandi</button>
+        </div>
+      </div>
+
+      {showForgotModal && <ForgotPasswordModal db={db} appId={appId} onClose={() => setShowForgotModal(false)} showToast={showToast} pegawaiList={pegawaiList} />}
+    </div>
+  );
+}
+
+function ForgotPasswordModal({ db, appId, onClose, showToast, pegawaiList }) {
+  const [nipReq, setNipReq] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!nipReq) return showToast("Masukkan NIP Anda", "error");
+    const peg = pegawaiList.find(p => p.nip === nipReq);
+    if (!peg) return showToast("NIP tidak ditemukan di database", "error");
+
+    setLoading(true);
+    try {
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'password_requests'), { nip: nipReq, nama: peg.nama, timestamp: Date.now() });
+      showToast("Permintaan reset sandi berhasil dikirim ke Admin!");
+      onClose();
+    } catch (err) { showToast("Gagal mengirim permintaan", "error"); } finally { setLoading(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md">
+      <div className="glass-card p-10 rounded-[3rem] max-w-sm w-full text-center border border-white/10 shadow-2xl animate-in zoom-in">
+        <Key size={40} className="text-amber-500 mx-auto mb-4" />
+        <h2 className="text-xl font-black mb-2 text-slate-950 dark:text-white">Lupa Password?</h2>
+        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-6 leading-relaxed">Kirim permintaan agar Admin mereset password Anda menjadi 123456</p>
+        <form onSubmit={handleSubmit} className="text-left space-y-4">
+          <input type="text" value={nipReq} onChange={e => setNipReq(e.target.value)} placeholder="Masukkan NIP Anda" className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs outline-none focus:ring-2 focus:ring-amber-500 font-bold dark:text-white shadow-inner text-slate-950" />
+          <button type="submit" disabled={loading} className="w-full py-4 bg-amber-500 text-white rounded-2xl font-black uppercase text-[10px] shadow-xl hover:scale-105 transition-transform">{loading ? 'Mengirim...' : 'Kirim Permintaan'}</button>
+          <button type="button" onClick={onClose} className="w-full py-2 text-slate-600 text-[9px] font-black uppercase mt-2">Batal</button>
+        </form>
       </div>
     </div>
   );
@@ -340,13 +333,12 @@ function LoginPage({ onLogin, credentials, pegawaiList, isDarkMode, toggleDarkMo
 // ==========================================
 // DASHBOARD UTAMA
 // ==========================================
-function MainDashboard({ currentUser, pegawaiList, allHistory, credentials, showToast, isDarkMode, toggleDarkMode, onLogout, appId, db, currentTime, isTimeSynced, timeAnomaly, pengumumanData }) {
+function MainDashboard({ currentUser, pegawaiList, allHistory, credentials, passRequests, showToast, isDarkMode, toggleDarkMode, onLogout, appId, db, currentTime, isTimeSynced, timeAnomaly, pengumumanData }) {
   const [activeTab, setActiveTab] = useState(currentUser.role === 'admin' ? 'rekap' : 'absen');
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [showPengumumanModal, setShowPengumumanModal] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState(null);
   
-  // State untuk Fitur Auto WA
   const [waConfig, setWaConfig] = useState(() => {
     const saved = localStorage.getItem('waAutoConfig');
     return saved ? JSON.parse(saved) : { enabled: false, time: '15:00', phone: '' };
@@ -362,19 +354,36 @@ function MainDashboard({ currentUser, pegawaiList, allHistory, credentials, show
     { id: 'kelola', label: 'Pegawai', icon: Users, admin: true },
   ];
 
-  // Logika Pemantau Waktu untuk WA Laporan Otomatis
+  // Auto WA Checker (Admin Only)
   useEffect(() => {
-    if (!waConfig.enabled || !waConfig.phone) return;
+    if (currentUser.role !== 'admin' || !waConfig.enabled || !waConfig.phone) return;
     const interval = setInterval(() => {
-      const nowWITA = formatWITA(currentTime).substring(0, 5); // format "HH:mm"
+      const nowWITA = formatWITA(currentTime).substring(0, 5); 
       const dateToday = formatDateIndo(currentTime);
-
-      if (nowWITA === waConfig.time && lastWADate !== dateToday) {
-        setShowWAAlert(true);
-      }
-    }, 10000); // cek setiap 10 detik
+      if (nowWITA === waConfig.time && lastWADate !== dateToday) setShowWAAlert(true);
+    }, 10000); 
     return () => clearInterval(interval);
-  }, [currentTime, waConfig, lastWADate]);
+  }, [currentTime, waConfig, lastWADate, currentUser.role]);
+
+  // AUTO BKO UNTUK GELORA KURNIAWAN
+  useEffect(() => {
+    if (pegawaiList.length === 0 || !db || !appId) return;
+    const gelora = pegawaiList.find(p => p.nama.includes('GELORA KURNIAWAN'));
+    if (!gelora) return;
+
+    const todayStr = formatDateIndo(currentTime);
+    const hasLogToday = allHistory.some(h => h.username === gelora.nip && h.dateStr === todayStr);
+
+    if (!hasLogToday && isTimeSynced) {
+      const data = {
+        username: gelora.nip, displayName: gelora.nama, type: 'BKO',
+        timestamp: currentTime.getTime(), dateStr: todayStr, timeStr: '07:00', photoStr: null,
+        location: { manual: true, lat: TARGET_LAT, lng: TARGET_LNG }, distance: 0,
+        deviceVerified: true, isServerSynced: true, antiManipulationEnabled: true, timezone: 'WITA', isAuto: true
+      };
+      addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'absensi'), data).catch(e => console.error("Auto BKO failed", e));
+    }
+  }, [formatDateIndo(currentTime), pegawaiList.length, isTimeSynced]);
 
   return (
     <div className="flex flex-col lg:flex-row min-h-screen">
@@ -382,18 +391,14 @@ function MainDashboard({ currentUser, pegawaiList, allHistory, credentials, show
         <div className="flex items-center gap-3 mb-12">
           <Shield className="text-blue-600" size={32} />
           <div>
-            <h2 className="text-xl font-black tracking-tight dark:text-white text-slate-950">SATU-KALA</h2>
+            <h2 className="text-xl font-black tracking-tight dark:text-white text-slate-950">SATU-LAKAL</h2>
             <p className="text-[7px] font-bold text-slate-500 uppercase leading-none mt-0.5">Lapas Kalabahi</p>
           </div>
         </div>
         <nav className="flex-1 space-y-3">
           {menuItems.map(item => (
             (!item.admin || currentUser.role === 'admin') && (
-              <button 
-                key={item.id} 
-                onClick={() => setActiveTab(item.id)}
-                className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl font-bold text-xs uppercase tracking-widest transition-all ${activeTab === item.id ? 'bg-blue-600 text-white shadow-xl shadow-blue-600/20' : 'text-slate-700 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}
-              >
+              <button key={item.id} onClick={() => setActiveTab(item.id)} className={`w-full flex items-center gap-4 px-5 py-4 rounded-2xl font-bold text-xs uppercase tracking-widest transition-all ${activeTab === item.id ? 'bg-blue-600 text-white shadow-xl shadow-blue-600/20' : 'text-slate-700 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'}`}>
                 <item.icon size={18} /> {item.label}
               </button>
             )
@@ -401,9 +406,9 @@ function MainDashboard({ currentUser, pegawaiList, allHistory, credentials, show
         </nav>
         <div className="pt-8 border-t border-slate-100 dark:border-slate-800 space-y-4">
           <button onClick={() => setShowPasswordModal(true)} className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl font-bold text-xs uppercase text-slate-800 dark:text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
-            <Key size={18} /> Ubah Sandi
+            <Key size={18} /> Ubah Password
           </button>
-          <button onClick={onLogout} className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl font-bold text-xs uppercase text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors">
+          <button onClick={() => setConfirmDialog({ title: "Keluar Aplikasi", message: "Apakah Anda yakin ingin keluar dari akun ini?", isDanger: true, confirmText: "Keluar", onConfirm: () => { setConfirmDialog(null); onLogout(); } })} className="w-full flex items-center gap-4 px-5 py-4 rounded-2xl font-bold text-xs uppercase text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 transition-colors">
             <LogOut size={18} /> Keluar
           </button>
         </div>
@@ -423,10 +428,9 @@ function MainDashboard({ currentUser, pegawaiList, allHistory, credentials, show
 
             <div className={`flex items-center gap-4 glass-card px-6 py-4 rounded-3xl w-full md:w-auto justify-between border-2 shadow-xl transition-all duration-700 ${timeAnomaly ? 'border-rose-600' : (isTimeSynced ? 'border-emerald-500/20' : 'border-blue-500/10')}`}>
               <div className="text-left md:text-right">
-                <div className="flex items-center md:justify-end gap-2">
-                  <p className={`text-3xl font-black tabular-nums leading-none ${timeAnomaly ? 'text-rose-600' : 'text-blue-600 dark:text-blue-400'}`}>
-                    {formatWITA(currentTime)}
-                  </p>
+                <div className="flex items-center md:justify-end gap-3">
+                  <p className="hidden sm:block text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400 text-right">{formatDateIndo(currentTime)}</p>
+                  <p className={`text-3xl font-black tabular-nums leading-none ${timeAnomaly ? 'text-rose-600' : 'text-blue-600 dark:text-blue-400'}`}>{formatWITA(currentTime)}</p>
                 </div>
                 <p className="text-[8px] font-black uppercase text-slate-700 dark:text-slate-500 mt-1 tracking-tighter flex items-center gap-1 md:justify-end">
                   {timeAnomaly ? <ShieldAlert size={10} className="text-rose-600"/> : (isTimeSynced ? <CheckCircle2 size={10} className="text-emerald-500"/> : <Loader2 size={10} className="animate-spin text-blue-500"/>)}
@@ -434,49 +438,31 @@ function MainDashboard({ currentUser, pegawaiList, allHistory, credentials, show
                 </p>
               </div>
               <div className="flex items-center gap-2">
-                <button onClick={() => setShowPasswordModal(true)} className="lg:hidden p-3 bg-slate-100 dark:bg-slate-800 rounded-xl transition-transform hover:scale-110 text-slate-700 dark:text-slate-300" title="Ubah Sandi">
-                  <Key size={18}/>
-                </button>
-                <button onClick={toggleDarkMode} className="p-3 bg-slate-100 dark:bg-slate-800 rounded-xl transition-transform hover:scale-110">
-                  {isDarkMode ? <Sun size={18} className="text-yellow-500"/> : <Moon size={18} className="text-blue-600"/>}
-                </button>
-                <button onClick={() => setConfirmDialog({
-                    title: "Keluar Aplikasi",
-                    message: "Apakah Anda yakin ingin keluar dari akun ini?",
-                    isDanger: true,
-                    confirmText: "Keluar",
-                    onConfirm: () => { setConfirmDialog(null); onLogout(); }
-                  })} 
-                  className="lg:hidden p-3 bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-500 rounded-xl transition-transform hover:scale-110" title="Keluar">
-                  <LogOut size={18}/>
-                </button>
+                <button onClick={() => setShowPasswordModal(true)} className="lg:hidden p-3 bg-slate-100 dark:bg-slate-800 rounded-xl transition-transform hover:scale-110 text-slate-700 dark:text-slate-300" title="Ubah Password"><Key size={18}/></button>
+                <button onClick={toggleDarkMode} className="p-3 bg-slate-100 dark:bg-slate-800 rounded-xl transition-transform hover:scale-110">{isDarkMode ? <Sun size={18} className="text-yellow-500"/> : <Moon size={18} className="text-blue-600"/>}</button>
+                <button onClick={() => setConfirmDialog({ title: "Keluar Aplikasi", message: "Apakah Anda yakin ingin keluar?", isDanger: true, confirmText: "Keluar", onConfirm: () => { setConfirmDialog(null); onLogout(); } })} className="lg:hidden p-3 bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-500 rounded-xl transition-transform hover:scale-110" title="Keluar"><LogOut size={18}/></button>
               </div>
             </div>
           </header>
 
-          {/* BANNER PENGUMUMAN INTERNAL */}
           <div className="mb-8 glass-card p-4 rounded-2xl flex items-center justify-between border-l-4 border-blue-500 shadow-md bg-blue-50/50 dark:bg-blue-900/10">
             <div className="flex items-center gap-4 overflow-hidden w-full">
               <Megaphone className="text-blue-600 shrink-0" size={20} />
               <div className="overflow-hidden w-full">
-                <div className="animate-marquee text-[11px] md:text-xs font-bold uppercase tracking-widest text-slate-700 dark:text-slate-300">
-                  {pengumumanData.text}
-                </div>
+                <div className="animate-marquee text-[11px] md:text-xs font-bold uppercase tracking-widest text-slate-700 dark:text-slate-300">{pengumumanData.text}</div>
               </div>
             </div>
             {currentUser.role === 'admin' && (
-              <button onClick={() => setShowPengumumanModal(true)} className="ml-4 p-3 bg-white dark:bg-slate-800 rounded-xl text-blue-600 shadow-sm hover:scale-110 transition-transform shrink-0" title="Edit Pengumuman">
-                <Edit size={16}/>
-              </button>
+              <button onClick={() => setShowPengumumanModal(true)} className="ml-4 p-3 bg-white dark:bg-slate-800 rounded-xl text-blue-600 shadow-sm hover:scale-110 transition-transform shrink-0" title="Edit Pengumuman"><Edit size={16}/></button>
             )}
           </div>
 
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
             {activeTab === 'absen' && <AbsenView currentUser={currentUser} currentTime={currentTime} allHistory={allHistory} showToast={showToast} appId={appId} db={db} isSynced={isTimeSynced && !timeAnomaly} />}
             {activeTab === 'riwayat' && <HistoryList history={currentUser.role === 'admin' ? allHistory : allHistory.filter(h => h.username === currentUser.rawUsername)} currentUser={currentUser} db={db} appId={appId} showToast={showToast} />}
-            {activeTab === 'rekap' && <RekapView allHistory={allHistory} pegawaiList={pegawaiList} waConfig={waConfig} setWaConfig={(cfg) => { setWaConfig(cfg); localStorage.setItem('waAutoConfig', JSON.stringify(cfg)); showToast("Pengaturan WA Laporan Otomatis Tersimpan!"); }} showToast={showToast} />}
+            {activeTab === 'rekap' && <RekapView currentUser={currentUser} allHistory={allHistory} pegawaiList={pegawaiList} waConfig={waConfig} setWaConfig={(cfg) => { setWaConfig(cfg); localStorage.setItem('waAutoConfig', JSON.stringify(cfg)); showToast("Pengaturan WA Laporan Otomatis Tersimpan!"); }} showToast={showToast} />}
             {activeTab === 'analitik' && <AnalitikView allHistory={allHistory} pegawaiList={pegawaiList} />}
-            {activeTab === 'kelola' && <KelolaView pegawaiList={pegawaiList} showToast={showToast} db={db} appId={appId} credentials={credentials} />}
+            {activeTab === 'kelola' && <KelolaView pegawaiList={pegawaiList} passRequests={passRequests} showToast={showToast} db={db} appId={appId} credentials={credentials} />}
           </div>
         </div>
       </main>
@@ -485,84 +471,43 @@ function MainDashboard({ currentUser, pegawaiList, allHistory, credentials, show
         {menuItems.map(item => (
           (!item.admin || currentUser.role === 'admin') && (
             <button key={item.id} onClick={() => setActiveTab(item.id)} className={`flex flex-col items-center gap-1 p-2 rounded-xl transition-all ${activeTab === item.id ? 'text-blue-600' : 'text-slate-700'}`}>
-              <item.icon size={20} />
-              <span className="text-[7px] font-black uppercase max-w-[60px] text-center truncate">{item.label}</span>
+              <item.icon size={20} /><span className="text-[7px] font-black uppercase max-w-[60px] text-center truncate">{item.label}</span>
             </button>
           )
         ))}
       </nav>
 
-      {/* MODALS */}
       {showPasswordModal && <PasswordModal currentUser={currentUser} credentials={credentials} db={db} appId={appId} onClose={() => setShowPasswordModal(false)} showToast={showToast} />}
-      
       {showPengumumanModal && <EditPengumumanModal db={db} appId={appId} pengumumanData={pengumumanData} onClose={() => setShowPengumumanModal(false)} showToast={showToast} />}
-
       {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
-
-      {/* Pop-up Kirim WA Otomatis */}
-      {showWAAlert && (
-        <AutoWAAlert 
-          onClose={() => setShowWAAlert(false)} 
-          onSend={() => {
-            const dateToday = formatDateIndo(currentTime);
-            localStorage.setItem('lastWADate', dateToday);
-            setLastWADate(dateToday);
-            setShowWAAlert(false);
-          }}
-          waConfig={waConfig}
-          allHistory={allHistory}
-          pegawaiList={pegawaiList}
-        />
+      {showWAAlert && currentUser.role === 'admin' && (
+        <AutoWAAlert onClose={() => setShowWAAlert(false)} onSend={() => { const d = formatDateIndo(currentTime); localStorage.setItem('lastWADate', d); setLastWADate(d); setShowWAAlert(false); }} waConfig={waConfig} allHistory={allHistory} pegawaiList={pegawaiList} />
       )}
     </div>
   );
 }
 
-// ==========================================
-// MODAL: EDIT PENGUMUMAN OLEH ADMIN
-// ==========================================
+// Modal Edit Pengumuman
 function EditPengumumanModal({ db, appId, pengumumanData, onClose, showToast }) {
   const [text, setText] = useState(pengumumanData.text);
   const [loading, setLoading] = useState(false);
-
   const handleSave = async (e) => {
-    e.preventDefault();
-    setLoading(true);
+    e.preventDefault(); setLoading(true);
     try {
-      if (pengumumanData.id) {
-        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pengumuman', pengumumanData.id), { text });
-      } else {
-        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pengumuman'), { text });
-      }
-      showToast("Pengumuman berhasil diperbarui!");
-      onClose();
-    } catch (err) {
-      showToast("Gagal menyimpan pengumuman", "error");
-    } finally {
-      setLoading(false);
-    }
+      if (pengumumanData.id) await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pengumuman', pengumumanData.id), { text });
+      else await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pengumuman'), { text });
+      showToast("Pengumuman berhasil diperbarui!"); onClose();
+    } catch (err) { showToast("Gagal menyimpan pengumuman", "error"); } finally { setLoading(false); }
   };
-
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md">
       <div className="glass-card p-10 rounded-[3rem] max-w-md w-full border border-white/10 shadow-2xl animate-in zoom-in">
         <Megaphone size={40} className="text-blue-500 mx-auto mb-4" />
         <h2 className="text-xl font-black mb-1 text-center text-slate-950 dark:text-white">Edit Pengumuman</h2>
-        <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-6 text-center leading-relaxed">Broadcast Internal Pegawai</p>
-        
+        <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-6 text-center">Broadcast Internal</p>
         <form onSubmit={handleSave} className="space-y-4 text-left">
-          <div className="space-y-1">
-            <textarea 
-              value={text} 
-              onChange={(e) => setText(e.target.value)} 
-              rows={4}
-              className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs outline-none focus:ring-2 focus:ring-blue-500 font-bold dark:text-white shadow-inner text-slate-950 resize-none" 
-              placeholder="Tulis pengumuman di sini..."
-            />
-          </div>
-          <button type="submit" disabled={loading} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] mt-4 shadow-xl shadow-blue-600/30 hover:scale-[1.02] transition-transform btn-3d">
-            {loading ? 'Menyimpan...' : 'Sebarkan Pengumuman'}
-          </button>
+          <textarea value={text} onChange={(e) => setText(e.target.value)} rows={4} className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs outline-none focus:ring-2 focus:ring-blue-500 font-bold dark:text-white shadow-inner text-slate-950 resize-none" placeholder="Tulis pengumuman..." />
+          <button type="submit" disabled={loading} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] mt-4 shadow-xl hover:scale-105 transition-transform btn-3d">{loading ? 'Menyimpan...' : 'Sebarkan'}</button>
           <button type="button" onClick={onClose} className="w-full py-2 text-slate-600 text-[9px] font-black uppercase mt-2">Batal</button>
         </form>
       </div>
@@ -571,7 +516,7 @@ function EditPengumumanModal({ db, appId, pengumumanData, onClose, showToast }) 
 }
 
 // ==========================================
-// VIEW: PRESENSI (ABSEN) + LIVE GPS MAP + FALLBACK PETA DARURAT
+// VIEW: PRESENSI (ABSEN) + LIVE GPS
 // ==========================================
 function AbsenView({ currentUser, currentTime, allHistory, showToast, appId, db, isSynced }) {
   const [photo, setPhoto] = useState(null);
@@ -589,53 +534,33 @@ function AbsenView({ currentUser, currentTime, allHistory, showToast, appId, db,
   const watchIdRef = useRef(null);
 
   useEffect(() => { 
-    return () => {
-      stopCamera(); 
-      if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
-    };
+    return () => { stopCamera(); if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current); };
   }, []);
 
   const startCamera = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        setIsCameraActive(true); 
-      }
+      if (videoRef.current) { videoRef.current.srcObject = stream; setIsCameraActive(true); }
     } catch (e) { showToast("Kamera tidak tersedia atau izin ditolak", "error"); setIsCameraActive(false); }
   };
 
   const stopCamera = () => { 
-    if (videoRef.current && videoRef.current.srcObject) {
-      videoRef.current.srcObject.getTracks().forEach(t => t.stop()); 
-    }
+    if (videoRef.current && videoRef.current.srcObject) videoRef.current.srcObject.getTracks().forEach(t => t.stop()); 
     setIsCameraActive(false);
   };
 
   const capturePhoto = () => {
     setIsScanning(true);
     setTimeout(() => {
-      const video = videoRef.current;
-      const canvas = canvasRef.current;
+      const video = videoRef.current; const canvas = canvasRef.current;
       if (!video || !canvas) return;
-
       const isDesktop = window.innerWidth >= 768;
-      const vW = video.videoWidth;
-      const vH = video.videoHeight;
-
-      if (isDesktop) { canvas.width = 640; canvas.height = 360; }
-      else { canvas.width = 480; canvas.height = 640; }
-
-      const targetRatio = canvas.width / canvas.height;
-      const sourceRatio = vW / vH;
-
+      const vW = video.videoWidth; const vH = video.videoHeight;
+      if (isDesktop) { canvas.width = 640; canvas.height = 360; } else { canvas.width = 480; canvas.height = 640; }
+      const targetRatio = canvas.width / canvas.height; const sourceRatio = vW / vH;
       let sx, sy, sWidth, sHeight;
-      if (sourceRatio > targetRatio) {
-        sHeight = vH; sWidth = vH * targetRatio; sx = (vW - sWidth) / 2; sy = 0;
-      } else {
-        sWidth = vW; sHeight = vW / targetRatio; sx = 0; sy = (vH - sHeight) / 2;
-      }
-
+      if (sourceRatio > targetRatio) { sHeight = vH; sWidth = vH * targetRatio; sx = (vW - sWidth) / 2; sy = 0; } 
+      else { sWidth = vW; sHeight = vW / targetRatio; sx = 0; sy = (vH - sHeight) / 2; }
       const ctx = canvas.getContext('2d');
       ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, canvas.width, canvas.height);
       setPhoto(canvas.toDataURL('image/jpeg', 0.8));
@@ -644,32 +569,19 @@ function AbsenView({ currentUser, currentTime, allHistory, showToast, appId, db,
   };
 
   const toggleLocationTracking = () => {
-    if (!navigator.geolocation) {
-      showToast("GPS tidak didukung! Silakan gunakan Lokasi Simulasi.", "error");
-      return;
-    }
-
+    if (!navigator.geolocation) return showToast("GPS tidak didukung! Silakan gunakan Lokasi Simulasi.", "error");
     if (isTrackingLocation) {
       if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
-      setIsTrackingLocation(false);
-      showToast("Pelacakan GPS dihentikan");
-      return;
+      setIsTrackingLocation(false); showToast("Pelacakan GPS dihentikan"); return;
     }
-
-    showToast("Memulai pelacakan lokasi real-time...");
-    setIsTrackingLocation(true);
+    showToast("Memulai pelacakan lokasi real-time..."); setIsTrackingLocation(true);
     watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
         const { latitude, longitude } = pos.coords;
         setLocation({ lat: latitude, lng: longitude });
         setDist(getDistanceInKm(latitude, longitude, TARGET_LAT, TARGET_LNG));
       },
-      (err) => {
-        // FALLBACK: Jika ditolak/gagal
-        showToast("Sinyal GPS Lemah/Ditolak! Silakan gunakan Lokasi Simulasi.", "error");
-        setIsTrackingLocation(false);
-        if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
-      },
+      (err) => { showToast("Sinyal GPS Lemah/Ditolak! Silakan gunakan Lokasi Simulasi.", "error"); setIsTrackingLocation(false); if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current); },
       { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
     );
   };
@@ -678,17 +590,18 @@ function AbsenView({ currentUser, currentTime, allHistory, showToast, appId, db,
     if (!auth.currentUser) return showToast("Sesi habis, harap login ulang", "error");
     if (!isSynced) return showToast("Waktu perangkat tidak valid", "error");
 
+    if (currentTime.getDay() === 0) {
+      return showToast("Sistem menolak: Hari Minggu tidak ada jadwal absensi.", "error");
+    }
+
     if (!location) {
       setConfirmDialog({
-        title: "PERINGATAN GPS",
-        message: "Sinyal GPS Anda belum terkunci atau menggunakan simulasi.\nAnda akan melakukan absensi TANPA verifikasi titik koordinat asli.\n\nTetap Lanjutkan?",
-        isDanger: true,
-        onConfirm: () => { setConfirmDialog(null); executeSubmit(); }
+        title: "PERINGATAN GPS", message: "Sinyal GPS Anda belum terkunci atau menggunakan simulasi.\nAnda akan melakukan absensi TANPA verifikasi titik koordinat asli.\n\nTetap Lanjutkan?",
+        isDanger: true, onConfirm: () => { setConfirmDialog(null); executeSubmit(); }
       });
     } else {
       setConfirmDialog({
-        title: "KONFIRMASI ABSENSI",
-        message: `Apakah Anda yakin ingin mengirim laporan [${absenType}] sekarang?\n\nPastikan foto wajah dan titik lokasi Anda sudah akurat.`,
+        title: "KONFIRMASI ABSENSI", message: `Apakah Anda yakin ingin mengirim laporan [${absenType}] sekarang?`,
         onConfirm: () => { setConfirmDialog(null); executeSubmit(); }
       });
     }
@@ -696,33 +609,20 @@ function AbsenView({ currentUser, currentTime, allHistory, showToast, appId, db,
 
   const executeSubmit = async () => {
     if (absenType === 'Sakit') {
-      const currentMonth = currentTime.getMonth();
-      const currentYear = currentTime.getFullYear();
-      const sickLogsThisMonth = allHistory.filter(h => {
-        const logDate = new Date(h.timestamp);
-        return h.username === currentUser.rawUsername && h.type === 'Sakit' && logDate.getMonth() === currentMonth && logDate.getFullYear() === currentYear;
-      });
-      if (sickLogsThisMonth.length >= 2) return showToast("Batas Sakit maksimal 2x sebulan telah tercapai", "error");
+      const sickLogs = allHistory.filter(h => new Date(h.timestamp).getMonth() === currentTime.getMonth() && h.username === currentUser.rawUsername && h.type === 'Sakit');
+      if (sickLogs.length >= 2) return showToast("Batas Sakit maksimal 2x sebulan telah tercapai", "error");
     }
-    
     setLoading(true);
     try {
-      const dateStr = formatDateIndo(currentTime);
-      const timeStr = formatWITA(currentTime).substring(0, 5);
-      
       const data = {
         username: currentUser.rawUsername, displayName: currentUser.username, type: absenType,
-        timestamp: currentTime.getTime(), dateStr, timeStr, photoStr: photo,
+        timestamp: currentTime.getTime(), dateStr: formatDateIndo(currentTime), timeStr: formatWITA(currentTime).substring(0, 5), photoStr: photo,
         location: location || { lat: 0, lng: 0, manual: true }, distance: dist || 0,
         deviceVerified: true, isServerSynced: true, antiManipulationEnabled: true, timezone: 'WITA'
       };
-
       await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'absensi'), data);
-      showToast(`Presensi ${absenType} Berhasil Disimpan!`);
-      setPhoto(null); 
-      startCamera(); 
-    } catch (e) { showToast("Gagal menyimpan data ke server", "error"); }
-    finally { setLoading(false); }
+      showToast(`Presensi ${absenType} Berhasil!`); setPhoto(null); startCamera(); 
+    } catch (e) { showToast("Gagal menyimpan data", "error"); } finally { setLoading(false); }
   };
 
   return (
@@ -732,27 +632,19 @@ function AbsenView({ currentUser, currentTime, allHistory, showToast, appId, db,
         <h3 className="text-[10px] font-black uppercase text-slate-700 dark:text-slate-500 mb-6 flex items-center gap-2"><Camera size={14} className="text-blue-600"/> Verifikasi Biometrik Wajah</h3>
         <div className="aspect-[3/4] md:aspect-video bg-slate-900 rounded-[2rem] overflow-hidden relative border-4 border-slate-200 dark:border-slate-800 shadow-inner">
           {!photo ? (
-            <>
-              <video ref={videoRef} autoPlay playsInline muted className={`w-full h-full object-cover ${isCameraActive ? 'block' : 'hidden'}`} />
-              
+            <><video ref={videoRef} autoPlay playsInline muted className={`w-full h-full object-cover ${isCameraActive ? 'block' : 'hidden'}`} />
               {!isCameraActive && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/95 z-10 p-6 text-center">
                   <Camera size={40} className="text-slate-500 mb-4" />
                   <p className="text-[9px] font-bold text-slate-400 mb-6 uppercase tracking-widest leading-relaxed">Kamera dalam status siaga<br/>Klik untuk memberikan izin</p>
-                  <button onClick={startCamera} className="px-6 py-4 bg-blue-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest btn-3d hover:scale-105 transition-transform">
-                    Izinkan & Buka Kamera
-                  </button>
+                  <button onClick={startCamera} className="px-6 py-4 bg-blue-600 text-white rounded-xl text-[10px] font-black uppercase tracking-widest btn-3d hover:scale-105 transition-transform">Izinkan & Buka Kamera</button>
                 </div>
               )}
-
               {isScanning && <div className="laser-line"></div>}
             </>
           ) : <img src={photo} className="w-full h-full object-cover" alt="Captured" />}
         </div>
-        <button 
-          onClick={photo ? () => {setPhoto(null); startCamera();} : (isCameraActive ? capturePhoto : startCamera)} 
-          className="w-full mt-8 py-5 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest btn-3d transition-all hover:brightness-110"
-        >
+        <button onClick={photo ? () => {setPhoto(null); startCamera();} : (isCameraActive ? capturePhoto : startCamera)} className="w-full mt-8 py-5 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest btn-3d transition-all hover:brightness-110">
           {photo ? 'Ambil Ulang Foto' : (isCameraActive ? 'Pindai Wajah Sekarang' : 'Nyalakan Kamera')}
         </button>
       </div>
@@ -760,41 +652,22 @@ function AbsenView({ currentUser, currentTime, allHistory, showToast, appId, db,
       <div className="space-y-6">
         <div className="glass-card p-6 md:p-8 rounded-[2.5rem] shadow-xl">
           <h3 className="text-[10px] font-black uppercase text-slate-700 dark:text-slate-500 mb-6 flex items-center gap-2">
-            <MapPin size={14} className={isTrackingLocation ? "text-emerald-500 animate-pulse" : "text-blue-600"}/> 
-            Koordinat Personel GPS {isTrackingLocation && "(LIVE)"}
+            <MapPin size={14} className={isTrackingLocation ? "text-emerald-500 animate-pulse" : "text-blue-600"}/> Koordinat Personel GPS {isTrackingLocation && "(LIVE)"}
           </h3>
           <div className="aspect-video bg-slate-900 rounded-[2rem] flex flex-col items-center justify-center border-4 border-slate-200 dark:border-slate-800 shadow-inner relative overflow-hidden">
             {location ? (
               <>
-                {/* Visual Peta Google Maps Real-Time */}
-                <iframe 
-                  title="Peta Lokasi Pegawai"
-                  src={`https://maps.google.com/maps?q=${location.lat},${location.lng}&z=16&output=embed`} 
-                  className="absolute inset-0 w-full h-full opacity-60 dark:opacity-40 pointer-events-none"
-                  frameBorder="0"
-                />
-                
+                <iframe title="Peta Lokasi" src={`https://maps.google.com/maps?q=${location.lat},${location.lng}&z=16&output=embed`} className="absolute inset-0 w-full h-full opacity-60 dark:opacity-40 pointer-events-none" frameBorder="0" />
                 <div className="text-center animate-in zoom-in z-10 bg-slate-900/70 p-5 rounded-2xl backdrop-blur-md border border-white/10 shadow-2xl">
                   <Activity size={32} className={`${isTrackingLocation ? 'text-emerald-500 animate-bounce' : 'text-blue-500'} mx-auto mb-3`}/>
                   <p className="text-white font-black text-xl tracking-tight">Sinyal GPS Terkunci</p>
-                  
-                  {/* Tampilan Koordinat Real */}
-                  <p className="text-[10px] font-bold text-slate-300 mt-3 uppercase tracking-widest font-mono">
-                    Lat: {location.lat.toFixed(5)} <br/> Lng: {location.lng.toFixed(5)}
-                  </p>
-                  <p className="text-[9px] font-black text-blue-400 mt-2 uppercase tracking-widest bg-blue-900/40 px-3 py-1 rounded-full inline-block">
-                    Jarak ke Lapas: {dist?.toFixed(2)} KM
-                  </p>
+                  <p className="text-[10px] font-bold text-slate-300 mt-3 uppercase tracking-widest font-mono">Lat: {location.lat.toFixed(5)} <br/> Lng: {location.lng.toFixed(5)}</p>
+                  <p className="text-[9px] font-black text-blue-400 mt-2 uppercase tracking-widest bg-blue-900/40 px-3 py-1 rounded-full inline-block">Jarak ke Lapas: {dist?.toFixed(2)} KM</p>
                 </div>
               </>
             ) : (
-              <div className="text-center p-6 opacity-40">
-                <MapPinOff size={40} className="text-rose-600 mx-auto mb-4"/>
-                <p className="text-rose-600 text-[10px] font-black uppercase tracking-widest">GPS Belum Terdeteksi</p>
-              </div>
+              <div className="text-center p-6 opacity-40"><MapPinOff size={40} className="text-rose-600 mx-auto mb-4"/><p className="text-rose-600 text-[10px] font-black uppercase tracking-widest">GPS Belum Terdeteksi</p></div>
             )}
-            
-            {/* Animasi Live Tracking */}
             {isTrackingLocation && (
               <div className="absolute top-4 right-4 flex items-center gap-2 z-20">
                 <span className="relative flex h-3 w-3"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500"></span></span>
@@ -802,29 +675,17 @@ function AbsenView({ currentUser, currentTime, allHistory, showToast, appId, db,
               </div>
             )}
           </div>
-          <button 
-            onClick={toggleLocationTracking} 
-            className={`w-full mt-6 py-4 glass-card rounded-2xl font-black text-[9px] uppercase btn-3d transition-all shadow-md ${isTrackingLocation ? 'bg-slate-100 text-rose-600 dark:bg-slate-950 dark:text-rose-500' : 'bg-white text-slate-900 dark:bg-slate-800 dark:text-white'}`}
-          >
+          <button onClick={toggleLocationTracking} className={`w-full mt-6 py-4 glass-card rounded-2xl font-black text-[9px] uppercase btn-3d transition-all shadow-md ${isTrackingLocation ? 'bg-slate-100 text-rose-600 dark:bg-slate-950 dark:text-rose-500' : 'bg-white text-slate-900 dark:bg-slate-800 dark:text-white'}`}>
             {isTrackingLocation ? 'Hentikan Lacak GPS' : 'Mulai Lacak GPS Real-Time (Peta)'}
           </button>
-          
-          {/* TOMBOL PETA DARURAT (MANUAL / SIMULASI) */}
-          <button 
-            onClick={() => {
-              setLocation({ lat: TARGET_LAT, lng: TARGET_LNG, manual: true });
-              setDist(0);
-              showToast("Lokasi simulasi diaktifkan!", "success");
-            }}
-            className="w-full mt-3 py-3 glass-card rounded-2xl font-black text-[9px] uppercase transition-all shadow-sm bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400 border border-amber-200 dark:border-amber-800"
-          >
+          <button onClick={() => { setLocation({ lat: TARGET_LAT, lng: TARGET_LNG, manual: true }); setDist(0); showToast("Lokasi simulasi diaktifkan!", "success"); }} className="w-full mt-3 py-3 glass-card rounded-2xl font-black text-[9px] uppercase transition-all shadow-sm bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
             Lokasi GPS Gagal? Gunakan Lokasi Simulasi
           </button>
         </div>
 
         <div className="glass-card p-6 md:p-8 rounded-[2.5rem] flex flex-col md:flex-row gap-4 items-center border border-blue-500/10 shadow-lg">
           <select value={absenType} onChange={e => setAbsenType(e.target.value)} className="w-full md:flex-1 p-4 bg-slate-100 dark:bg-slate-900 border-none rounded-2xl font-black text-xs text-center outline-none cursor-pointer text-slate-950 dark:text-white shadow-inner">
-            {['Masuk', 'Keluar', 'Lepas Piket', 'Sakit', 'Cuti', 'Dinas Luar'].map(t => <option key={t} value={t}>{t}</option>)}
+            {['Masuk', 'Keluar', 'Lepas Piket', 'Sakit', 'Cuti', 'Dinas Luar', 'BKO'].map(t => <option key={t} value={t}>{t}</option>)}
           </select>
           <button disabled={!photo || loading || !isSynced} onClick={submitAbsenClick} className="w-full md:w-auto px-10 py-5 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] btn-3d shadow-xl shadow-blue-600/30 disabled:opacity-30 disabled:scale-100 transition-all active:scale-95">
             {loading ? <Loader2 className="animate-spin mx-auto" size={18}/> : `Lapor ${absenType}`}
@@ -837,153 +698,271 @@ function AbsenView({ currentUser, currentTime, allHistory, showToast, appId, db,
 }
 
 // ==========================================
-// VIEW: LAPORAN (REKAPITULASI) + WA FEATURE
+// VIEW: LAPORAN (REKAPITULASI & RANKING)
 // ==========================================
-function RekapView({ allHistory, pegawaiList, waConfig, setWaConfig, showToast }) {
+function RekapView({ currentUser, allHistory, pegawaiList, waConfig, setWaConfig, showToast }) {
+  const [mainTab, setMainTab] = useState('rekap'); 
+  const [rekapType, setRekapType] = useState('harian'); 
+  const [startDate, setStartDate] = useState('');
+  const [endDate, setEndDate] = useState('');
   const [showWASettings, setShowWASettings] = useState(false);
-  const today = formatDateIndo(new Date());
-  const todayLogs = allHistory.filter(h => h.dateStr === today);
   const bidangs = ["KALAPAS", "Tata Usaha", "KPLP", "Adm Kamtib", "Binadikgiatja"];
+  
+  const todayObj = new Date();
+  const todayStr = formatDateIndo(todayObj);
 
-  const getFinalStatus = (logs) => {
-    if (logs.length === 0) return { label: 'TANPA KETERANGAN', class: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400' };
-    const special = logs.find(l => ['Sakit', 'Cuti', 'Dinas Luar', 'Lepas Piket'].includes(l.type));
-    if (special) return { label: special.type.toUpperCase(), class: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400' };
+  const getFilteredLogs = () => {
+    const now = todayObj.getTime();
+    let limit = now;
+    if (mainTab === 'ranking') return allHistory;
+    
+    if (rekapType === 'harian') return allHistory.filter(h => h.dateStr === todayStr);
+    if (rekapType === 'mingguan') limit = now - (7 * 24 * 60 * 60 * 1000);
+    if (rekapType === 'bulanan') limit = now - (30 * 24 * 60 * 60 * 1000);
+    if (rekapType === 'triwulan') limit = now - (90 * 24 * 60 * 60 * 1000);
+    
+    if (rekapType === 'custom') {
+      if (startDate && endDate) {
+        const start = new Date(startDate).setHours(0,0,0,0);
+        const end = new Date(endDate).setHours(23,59,59,999);
+        return allHistory.filter(h => h.timestamp >= start && h.timestamp <= end);
+      }
+      return [];
+    }
+    
+    return allHistory.filter(h => h.timestamp >= limit);
+  };
+
+  const getDateRangeText = () => {
+    const now = todayObj;
+    let startD = todayObj;
+    if (rekapType === 'harian') { startD = now; }
+    else if (rekapType === 'mingguan') { startD = new Date(now.getTime() - (7 * 24 * 60 * 60 * 1000)); }
+    else if (rekapType === 'bulanan') { startD = new Date(now.getTime() - (30 * 24 * 60 * 60 * 1000)); }
+    else if (rekapType === 'triwulan') { startD = new Date(now.getTime() - (90 * 24 * 60 * 60 * 1000)); }
+    else { return null; }
+    
+    const formatShort = (d) => d.toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' });
+    if (rekapType === 'harian') return formatShort(now);
+    return `${formatShort(startD)} - ${formatShort(now)}`;
+  };
+
+  const filteredLogs = getFilteredLogs();
+  const isDaily = rekapType === 'harian';
+
+  const getStatusKompleks = (logs, dateObj) => {
+    if (logs.length === 0) return { label: 'TANPA KETERANGAN', class: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400', isBad: true };
+    const special = logs.find(l => ['Sakit', 'Cuti', 'Dinas Luar', 'Lepas Piket', 'BKO'].includes(l.type));
+    if (special) return { label: special.type.toUpperCase(), class: 'bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400', isBad: false };
+    
     const inLog = logs.find(l => l.type === 'Masuk');
+    const outLog = logs.find(l => l.type === 'Keluar');
+    const day = dateObj.getDay();
+
+    let labels = [];
+    let isBad = false;
+
     if (inLog) {
       const [h, m] = inLog.timeStr.split(':').map(Number);
-      if (h > 7 || (h === 7 && m > 30)) return { label: 'TERLAMBAT', class: 'bg-amber-100 text-amber-800 dark:bg-amber-950/30 dark:text-amber-400' };
-      return { label: 'HADIR', class: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-400' };
+      const diff = getMinutesDiff(7, 30, h, m);
+      if (diff > 0) { labels.push(`TELAT ${diff}m`); isBad = true; } 
+      else { labels.push('TEPAT'); }
     }
-    return { label: 'AKTIF', class: 'bg-slate-100 text-slate-800 dark:bg-slate-800' };
+
+    if (outLog) {
+      const [h, m] = outLog.timeStr.split(':').map(Number);
+      let lH = 14, lM = 30; // Sen-Kam
+      if (day === 5) { lH = 11; lM = 30; } // Jum
+      else if (day === 6) { lH = 13; lM = 0; } // Sab
+      const diff = getMinutesDiff(lH, lM, h, m);
+      if (diff < 0) { labels.push(`AWAL ${Math.abs(diff)}m`); isBad = true; }
+    }
+
+    if (!labels.length) return { label: 'AKTIF', class: 'bg-slate-100 text-slate-800 dark:bg-slate-800' };
+    return { label: labels.join(' | '), class: isBad ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/30 dark:text-amber-400' : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-400', isBad };
   };
 
   const getWAPesanLaporan = () => {
-    let hadirCount = 0; let telatCount = 0; let tkCount = 0; let khususCount = 0;
+    let h = 0, t = 0, tk = 0, k = 0;
     pegawaiList.forEach(p => {
-      const logs = todayLogs.filter(l => l.username === p.nip);
-      const s = getFinalStatus(logs).label;
-      if (s === 'HADIR') hadirCount++;
-      else if (s === 'TERLAMBAT') telatCount++;
-      else if (s === 'TANPA KETERANGAN') tkCount++;
-      else khususCount++;
+      const logs = filteredLogs.filter(l => l.username === p.nip);
+      const s = getStatusKompleks(logs, todayObj);
+      if (s.label === 'TANPA KETERANGAN') tk++;
+      else if (s.isBad) t++;
+      else if (s.label.includes('TEPAT')) h++;
+      else k++;
     });
-
-    return `*LAPORAN ABSENSI SATU-KALA*
-Lapas Kelas IIB Kalabahi
-Hari/Tanggal: ${today}
-
-*REKAPITULASI KEHADIRAN*
-👥 Total Personel: ${pegawaiList.length} Orang
-✅ Hadir Tepat Waktu: ${hadirCount} Orang
-⚠️ Terlambat: ${telatCount} Orang
-ℹ️ Sakit/Cuti/DL: ${khususCount} Orang
-❌ Tanpa Keterangan: ${tkCount} Orang
-
-_Pesan ini dikirim secara otomatis melalui sistem SATU-KALA._`;
+    return `*LAPORAN ABSENSI SATU-LAKAL*\nHari/Tanggal: ${todayStr}\n\n*REKAPITULASI*\n👥 Total: ${pegawaiList.length}\n✅ Hadir Tepat: ${h}\n⚠️ Terlambat/Pulang Awal: ${t}\nℹ️ Sakit/Cuti/DL/BKO: ${k}\n❌ Tanpa Keterangan: ${tk}`;
   };
 
-  const sendManualWA = () => {
-    const text = encodeURIComponent(getWAPesanLaporan());
-    const phone = waConfig.phone || '';
-    const url = phone ? `https://wa.me/${phone}?text=${text}` : `https://wa.me/?text=${text}`;
-    window.open(url, '_blank');
+  const calculateRanking = () => {
+    const bulananLogs = allHistory.filter(h => h.timestamp >= (todayObj.getTime() - (30 * 24 * 60 * 60 * 1000)));
+    // Kecualikan Gelora Kurniawan dari perhitungan ranking
+    const pegawaiRanking = pegawaiList.filter(p => !p.nama.includes('GELORA KURNIAWAN'));
+    
+    const scores = pegawaiRanking.map(p => {
+      const logs = bulananLogs.filter(l => l.username === p.nip);
+      let tepat = 0, bad = 0, tk = 0;
+      for(let i=0; i<26; i++){
+        const d = new Date(todayObj.getTime() - (i * 24 * 60 * 60 * 1000));
+        if(d.getDay() === 0) continue; 
+        const dailyLogs = logs.filter(l => l.dateStr === formatDateIndo(d));
+        const st = getStatusKompleks(dailyLogs, d);
+        if (st.label === 'TANPA KETERANGAN') tk++;
+        else if (st.isBad) bad++;
+        else if (st.label.includes('TEPAT')) tepat++;
+      }
+      return { p, tepat, bad, tk, score: (tepat * 2) - bad - (tk * 3) };
+    });
+    scores.sort((a, b) => b.score - a.score);
+    return { best: scores.slice(0, 3), worst: scores.slice(-3).reverse() };
   };
+
+  const rankData = mainTab === 'ranking' ? calculateRanking() : null;
 
   return (
     <div className="glass-card rounded-[3rem] overflow-hidden shadow-2xl">
       <div className="p-8 md:p-10 border-b border-slate-100 dark:border-slate-800 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
         <div>
-          <h2 className="text-2xl font-black text-slate-950 dark:text-white tabular-nums tracking-tighter leading-none">{today}</h2>
-          <p className="text-[9px] font-black uppercase text-slate-700 dark:text-slate-500 mt-2">Daftar Kehadiran Personel (Verifikasi Server WITA)</p>
+          <h2 className="text-2xl font-black text-slate-950 dark:text-white tabular-nums tracking-tighter leading-none">
+            {mainTab === 'rekap' ? (rekapType === 'harian' ? todayStr : `Rekap ${rekapType.toUpperCase()}`) : 'Ranking Absensi'}
+          </h2>
+          <p className="text-[9px] font-black uppercase text-slate-700 dark:text-slate-500 mt-2">Daftar Kehadiran & Laporan</p>
         </div>
-        <div className="flex flex-wrap gap-3 w-full md:w-auto">
-          <button onClick={() => setShowWASettings(true)} className="flex-1 md:flex-none px-5 py-4 bg-amber-500 text-white rounded-2xl font-black text-[9px] uppercase btn-3d flex items-center justify-center gap-2">
-            <BellRing size={14}/> Auto WA
-          </button>
-          <button onClick={sendManualWA} className="flex-1 md:flex-none px-5 py-4 bg-emerald-600 text-white rounded-2xl font-black text-[9px] uppercase btn-3d flex items-center justify-center gap-2">
-            <MessageSquare size={14}/> Kirim WA
-          </button>
-          <button onClick={() => window.print()} className="flex-1 md:flex-none px-5 py-4 bg-slate-900 dark:bg-slate-800 text-white rounded-2xl font-black text-[9px] uppercase btn-3d flex items-center justify-center gap-2">
-            <Printer size={14}/> Cetak PDF
-          </button>
+        <div className="flex flex-wrap gap-2 w-full md:w-auto">
+          {['Rekap Absen', 'Ranking'].map(f => (
+            <button key={f} onClick={() => setMainTab(f === 'Ranking' ? 'ranking' : 'rekap')} className={`px-4 py-3 rounded-xl font-black text-[9px] uppercase transition-all ${mainTab === (f === 'Ranking' ? 'ranking' : 'rekap') ? 'bg-blue-600 text-white shadow-lg shadow-blue-600/30' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400 hover:bg-slate-200'}`}>
+              {f === 'Ranking' ? <Trophy size={14} className="inline mr-1"/> : <CalendarDays size={14} className="inline mr-1"/>} {f}
+            </button>
+          ))}
+          {currentUser.role === 'admin' && mainTab === 'rekap' && (
+            <>
+              <button onClick={() => setShowWASettings(true)} className="px-4 py-3 bg-amber-500 text-white rounded-xl font-black text-[9px] uppercase shadow-lg"><BellRing size={14}/></button>
+              <button onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent(getWAPesanLaporan())}`, '_blank')} className="px-4 py-3 bg-emerald-600 text-white rounded-xl font-black text-[9px] uppercase shadow-lg"><MessageSquare size={14}/></button>
+            </>
+          )}
         </div>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-left min-w-[800px]">
-          <thead className="bg-slate-100 dark:bg-slate-950 text-slate-700 dark:text-slate-500 uppercase text-[9px] font-black tracking-widest">
-            <tr><th className="px-10 py-6">Personel</th><th className="px-6 py-6 text-center">Masuk</th><th className="px-6 py-6 text-center">Keluar</th><th className="px-6 py-6 text-center">Status Akhir</th></tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-            {bidangs.map(bidang => (
-              <React.Fragment key={bidang}>
-                <tr className="bg-slate-50/50 dark:bg-slate-950/20"><td colSpan="4" className="px-10 py-4 text-blue-600 font-black uppercase text-[8px] tracking-widest">{bidang}</td></tr>
-                {pegawaiList.filter(p => p.bidang === bidang).map(p => {
-                  const logs = todayLogs.filter(l => l.username === p.nip);
-                  const inLog = logs.find(l => l.type === 'Masuk');
-                  const outLog = logs.find(l => l.type === 'Keluar');
-                  const status = getFinalStatus(logs);
-                  return (
-                    <tr key={p.nip} className="hover:bg-slate-100/50 dark:hover:bg-slate-800/10 transition-colors">
-                      <td className="px-10 py-6"><p className="font-black text-sm text-slate-950 dark:text-white leading-none">{p.nama}</p><p className="text-[9px] font-bold text-slate-600 dark:text-slate-400 mt-2 uppercase leading-relaxed">{p.nip} | {p.jabatan}</p></td>
-                      <td className="px-6 py-6 text-center">{inLog ? <div className="flex flex-col items-center gap-1"><img src={inLog.photoStr} className="w-12 h-12 rounded-xl border-2 border-emerald-500 object-cover shadow-lg mx-auto"/><span className="text-[7px] font-black text-emerald-600 uppercase mt-1">{inLog.timeStr}</span></div> : <div className="w-10 h-10 bg-slate-200 dark:bg-slate-800 rounded-xl mx-auto opacity-30 flex items-center justify-center text-slate-400"><User size={16}/></div>}</td>
-                      <td className="px-6 py-6 text-center">{outLog ? <div className="flex flex-col items-center gap-1"><img src={outLog.photoStr} className="w-12 h-12 rounded-xl border-2 border-rose-600 object-cover shadow-lg mx-auto"/><span className="text-[7px] font-black text-rose-600 uppercase mt-1">{outLog.timeStr}</span></div> : <div className="w-10 h-10 bg-slate-200 dark:bg-slate-800 rounded-xl mx-auto opacity-30 flex items-center justify-center text-slate-400"><User size={16}/></div>}</td>
-                      <td className="px-6 py-6 text-center"><span className={`px-4 py-1.5 rounded-full text-[8px] font-black tracking-widest ${status.class}`}>{status.label}</span></td>
-                    </tr>
-                  );
-                })}
-              </React.Fragment>
-            ))}
-          </tbody>
-        </table>
       </div>
 
-      {showWASettings && (
-        <WASettingsModal waConfig={waConfig} setWaConfig={setWaConfig} onClose={() => setShowWASettings(false)} />
+      {mainTab === 'rekap' && (
+        <div className="px-8 md:px-10 pt-6 pb-2 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/20">
+          <div className="flex flex-wrap items-center gap-4">
+            <select value={rekapType} onChange={e => setRekapType(e.target.value)} className="p-3 rounded-xl bg-white dark:bg-slate-950 text-[10px] font-black uppercase tracking-widest text-slate-700 dark:text-slate-300 outline-none border border-slate-200 dark:border-slate-800 shadow-sm cursor-pointer hover:border-blue-500 transition-colors">
+              <option value="harian">Harian (Hari Ini)</option>
+              <option value="mingguan">Mingguan (7 Hari Terakhir)</option>
+              <option value="bulanan">Bulanan (30 Hari Terakhir)</option>
+              <option value="triwulan">Triwulan (90 Hari Terakhir)</option>
+              <option value="custom">Pilih Tanggal Manual</option>
+            </select>
+
+            {rekapType !== 'custom' && (
+              <span className="text-[10px] font-bold text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-3 py-3 rounded-xl border border-slate-200 dark:border-slate-700 whitespace-nowrap shadow-sm">
+                Periode: {getDateRangeText()}
+              </span>
+            )}
+
+            {rekapType === 'custom' && (
+              <div className="flex items-center gap-2">
+                <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="p-3 rounded-xl bg-white dark:bg-slate-950 text-[10px] font-black uppercase text-slate-700 dark:text-slate-300 outline-none border border-slate-200 dark:border-slate-800 shadow-sm dark:[color-scheme:dark]" />
+                <span className="text-xs font-bold text-slate-500">-</span>
+                <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="p-3 rounded-xl bg-white dark:bg-slate-950 text-[10px] font-black uppercase text-slate-700 dark:text-slate-300 outline-none border border-slate-200 dark:border-slate-800 shadow-sm dark:[color-scheme:dark]" />
+              </div>
+            )}
+          </div>
+        </div>
       )}
+
+      {mainTab === 'ranking' ? (
+        <div className="p-10 grid grid-cols-1 md:grid-cols-2 gap-8">
+          <div className="space-y-4">
+            <h3 className="text-sm font-black text-emerald-600 uppercase flex items-center gap-2"><Trophy size={18}/> 3 Terbaik Bulan Ini</h3>
+            {rankData.best.map((item, i) => (
+              <div key={i} className="glass-card p-5 rounded-2xl border-l-4 border-emerald-500 shadow-sm flex justify-between items-center">
+                <div><p className="font-bold text-xs text-slate-900 dark:text-white">{item.p.nama}</p><p className="text-[9px] text-slate-500 uppercase">{item.p.bidang}</p></div>
+                <div className="text-right text-[9px] font-black"><p className="text-emerald-600">{item.tepat} Tepat Waktu</p></div>
+              </div>
+            ))}
+          </div>
+          <div className="space-y-4">
+            <h3 className="text-sm font-black text-rose-600 uppercase flex items-center gap-2"><ThumbsDown size={18}/> Perlu Peningkatan</h3>
+            {rankData.worst.map((item, i) => (
+              <div key={i} className="glass-card p-5 rounded-2xl border-l-4 border-rose-500 shadow-sm flex justify-between items-center">
+                <div><p className="font-bold text-xs text-slate-900 dark:text-white">{item.p.nama}</p><p className="text-[9px] text-slate-500 uppercase">{item.p.bidang}</p></div>
+                <div className="text-right text-[9px] font-black"><p className="text-rose-600">{item.tk} Tanpa Ket.</p><p className="text-amber-600">{item.bad} Pelanggaran Waktu</p></div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-left min-w-[800px]">
+            <thead className="bg-slate-100 dark:bg-slate-950 text-slate-700 dark:text-slate-500 uppercase text-[9px] font-black tracking-widest">
+              <tr>
+                <th className="px-10 py-6">Personel</th>
+                {isDaily ? (
+                  <><th className="px-6 py-6 text-center">Masuk</th><th className="px-6 py-6 text-center">Keluar</th><th className="px-6 py-6 text-center">Status Akhir</th></>
+                ) : (
+                  <><th className="px-6 py-6 text-center">Total Masuk</th><th className="px-6 py-6 text-center">Khusus (BKO/Sakit)</th><th className="px-6 py-6 text-center">Rekap Data</th></>
+                )}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+              {bidangs.map(bidang => (
+                <React.Fragment key={bidang}>
+                  <tr className="bg-slate-50/50 dark:bg-slate-950/20"><td colSpan="4" className="px-10 py-4 text-blue-600 font-black uppercase text-[8px] tracking-widest">{bidang}</td></tr>
+                  {pegawaiList.filter(p => p.bidang === bidang).map(p => {
+                    const logs = filteredLogs.filter(l => l.username === p.nip);
+                    
+                    if (isDaily) {
+                      const inLog = logs.find(l => l.type === 'Masuk');
+                      const outLog = logs.find(l => l.type === 'Keluar');
+                      const status = getStatusKompleks(logs, todayObj);
+                      return (
+                        <tr key={p.nip} className="hover:bg-slate-100/50 dark:hover:bg-slate-800/10 transition-colors">
+                          <td className="px-10 py-6"><p className="font-black text-sm text-slate-950 dark:text-white leading-none">{p.nama}</p><p className="text-[9px] font-bold text-slate-600 dark:text-slate-400 mt-2 uppercase">{p.nip}</p></td>
+                          <td className="px-6 py-6 text-center">{inLog ? <div className="flex flex-col items-center gap-1"><img src={inLog.photoStr} className="w-12 h-12 rounded-xl border-2 border-emerald-500 object-cover shadow-lg mx-auto"/><span className="text-[7px] font-black text-emerald-600 uppercase mt-1">{inLog.timeStr}</span></div> : '-'}</td>
+                          <td className="px-6 py-6 text-center">{outLog ? <div className="flex flex-col items-center gap-1"><img src={outLog.photoStr} className="w-12 h-12 rounded-xl border-2 border-rose-600 object-cover shadow-lg mx-auto"/><span className="text-[7px] font-black text-rose-600 uppercase mt-1">{outLog.timeStr}</span></div> : '-'}</td>
+                          <td className="px-6 py-6 text-center"><span className={`px-3 py-1.5 rounded-full text-[8px] font-black tracking-widest ${status.class}`}>{status.label}</span></td>
+                        </tr>
+                      );
+                    } else {
+                      const m = logs.filter(l => l.type === 'Masuk').length;
+                      const kh = logs.filter(l => ['Sakit', 'Cuti', 'Dinas Luar', 'Lepas Piket', 'BKO'].includes(l.type)).length;
+                      return (
+                        <tr key={p.nip} className="hover:bg-slate-100/50 dark:hover:bg-slate-800/10 transition-colors">
+                          <td className="px-10 py-6"><p className="font-black text-sm text-slate-950 dark:text-white leading-none">{p.nama}</p><p className="text-[9px] font-bold text-slate-600 dark:text-slate-400 mt-2 uppercase">{p.nip}</p></td>
+                          <td className="px-6 py-6 text-center font-black text-emerald-600 text-lg">{m}x</td>
+                          <td className="px-6 py-6 text-center font-black text-blue-600 text-lg">{kh}x</td>
+                          <td className="px-6 py-6 text-center"><span className="px-4 py-2 bg-slate-100 dark:bg-slate-800 rounded-xl text-[9px] font-black uppercase text-slate-600">{logs.length} Log Total</span></td>
+                        </tr>
+                      );
+                    }
+                  })}
+                </React.Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {showWASettings && currentUser.role === 'admin' && <WASettingsModal waConfig={waConfig} setWaConfig={setWaConfig} onClose={() => setShowWASettings(false)} />}
     </div>
   );
 }
 
-// Modal Pengaturan Auto WhatsApp
+// Modal Pengaturan WA
 function WASettingsModal({ waConfig, setWaConfig, onClose }) {
-  const [phone, setPhone] = useState(waConfig.phone);
-  const [time, setTime] = useState(waConfig.time);
-  const [enabled, setEnabled] = useState(waConfig.enabled);
-
-  const handleSave = (e) => {
-    e.preventDefault();
-    setWaConfig({ phone, time, enabled });
-    onClose();
-  };
-
+  const [phone, setPhone] = useState(waConfig.phone); const [time, setTime] = useState(waConfig.time); const [enabled, setEnabled] = useState(waConfig.enabled);
+  const handleSave = (e) => { e.preventDefault(); setWaConfig({ phone, time, enabled }); onClose(); };
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md">
       <div className="glass-card p-10 rounded-[3rem] max-w-sm w-full border border-white/10 shadow-2xl animate-in zoom-in">
         <MessageSquare size={40} className="text-emerald-500 mx-auto mb-4" />
         <h2 className="text-xl font-black mb-1 text-center text-slate-950 dark:text-white">Otomasi WhatsApp</h2>
-        <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-6 leading-relaxed text-center">Pengingat Pengiriman Laporan</p>
-        
-        <form onSubmit={handleSave} className="space-y-4 text-left">
-          <div className="space-y-1">
-            <label className="text-[8px] font-black uppercase text-slate-500 ml-2">Status Otomasi</label>
-            <select value={enabled} onChange={e => setEnabled(e.target.value === 'true')} className="w-full p-4 bg-slate-100 dark:bg-slate-900 border-none rounded-2xl font-bold text-xs outline-none text-slate-950 dark:text-white shadow-inner">
-              <option value="false">Nonaktifkan</option>
-              <option value="true">Aktifkan Pengingat</option>
-            </select>
-          </div>
-          <div className="space-y-1">
-            <label className="text-[8px] font-black uppercase text-slate-500 ml-2">Nomor Tujuan WA (Cth: 62812...)</label>
-            <input type="text" value={phone} onChange={e => setPhone(e.target.value)} placeholder="Mulai dengan 62" className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs outline-none font-bold dark:text-white shadow-inner text-slate-950" />
-          </div>
-          <div className="space-y-1">
-            <label className="text-[8px] font-black uppercase text-slate-500 ml-2">Jadwal Pengiriman (WITA)</label>
-            <input type="time" value={time} onChange={e => setTime(e.target.value)} className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs outline-none font-bold dark:text-white shadow-inner text-slate-950" />
-          </div>
-          <div className="p-3 bg-amber-50 dark:bg-amber-950/30 rounded-xl mt-2 border border-amber-200 dark:border-amber-800 text-[8px] text-amber-700 dark:text-amber-400 font-bold leading-relaxed">
-            *Karena kebijakan keamanan browser, pengiriman otomatis akan memunculkan tombol konfirmasi (pop-up) di layar Anda pada jam yang ditentukan untuk menghindari pemblokiran WhatsApp.
-          </div>
-          <button type="submit" className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black uppercase text-[10px] mt-2 shadow-xl shadow-emerald-600/30 hover:scale-[1.02] transition-transform btn-3d">Simpan Pengaturan</button>
+        <form onSubmit={handleSave} className="space-y-4 text-left mt-6">
+          <select value={enabled} onChange={e => setEnabled(e.target.value === 'true')} className="w-full p-4 bg-slate-100 dark:bg-slate-900 rounded-2xl font-bold text-xs"><option value="false">Nonaktifkan</option><option value="true">Aktifkan Pengingat</option></select>
+          <input type="text" value={phone} onChange={e => setPhone(e.target.value)} placeholder="Nomor WA (62...)" className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold" />
+          <input type="time" value={time} onChange={e => setTime(e.target.value)} className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold" />
+          <button type="submit" className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black uppercase text-[10px] mt-2 btn-3d">Simpan</button>
           <button type="button" onClick={onClose} className="w-full py-2 text-slate-600 text-[9px] font-black uppercase mt-2">Batal</button>
         </form>
       </div>
@@ -991,57 +970,31 @@ function WASettingsModal({ waConfig, setWaConfig, onClose }) {
   );
 }
 
-// Komponen Alert Kirim WA Otomatis (Muncul saat jam tiba)
 function AutoWAAlert({ onClose, onSend, waConfig, allHistory, pegawaiList }) {
   const handleSend = () => {
-    const today = formatDateIndo(new Date());
-    const todayLogs = allHistory.filter(h => h.dateStr === today);
-    
+    const today = formatDateIndo(new Date()); const todayLogs = allHistory.filter(h => h.dateStr === today);
     let hadirCount = 0; let telatCount = 0; let tkCount = 0; let khususCount = 0;
     pegawaiList.forEach(p => {
       const logs = todayLogs.filter(l => l.username === p.nip);
       const isHadir = logs.some(l => l.type === 'Masuk');
-      const isKhusus = logs.some(l => ['Sakit', 'Cuti', 'Dinas Luar', 'Lepas Piket'].includes(l.type));
-      if (isKhusus) khususCount++;
-      else if (isHadir) hadirCount++;
-      else tkCount++;
+      const isKhusus = logs.some(l => ['Sakit', 'Cuti', 'Dinas Luar', 'Lepas Piket', 'BKO'].includes(l.type));
+      if (isKhusus) khususCount++; else if (isHadir) hadirCount++; else tkCount++;
     });
-
-    const text = encodeURIComponent(`*LAPORAN ABSENSI SATU-KALA*
-Lapas Kelas IIB Kalabahi
-Hari/Tanggal: ${today}
-
-*REKAPITULASI KEHADIRAN*
-👥 Total Personel: ${pegawaiList.length} Orang
-✅ Hadir: ${hadirCount} Orang
-ℹ️ Sakit/Cuti/DL: ${khususCount} Orang
-❌ Tanpa Keterangan: ${tkCount} Orang
-
-_Pesan ini dikirim secara otomatis melalui sistem SATU-KALA._`);
-
-    const url = waConfig.phone ? `https://wa.me/${waConfig.phone}?text=${text}` : `https://wa.me/?text=${text}`;
-    window.open(url, '_blank');
+    const text = encodeURIComponent(`*LAPORAN ABSENSI SATU-LAKAL*\nLapas Kelas IIB Kalabahi\n\n👥 Total: ${pegawaiList.length} Orang\n✅ Hadir: ${hadirCount} Orang\nℹ️ Khusus: ${khususCount} Orang\n❌ Tanpa Ket: ${tkCount} Orang`);
+    window.open(waConfig.phone ? `https://wa.me/${waConfig.phone}?text=${text}` : `https://wa.me/?text=${text}`, '_blank');
     onSend();
   };
-
   return (
-    <div className="fixed inset-0 z-[500] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-xl animate-in fade-in duration-300">
-      <div className="glass-card p-10 md:p-16 rounded-[3rem] w-full max-w-lg text-center border-2 border-emerald-500 shadow-2xl animate-in zoom-in-95 duration-500">
+    <div className="fixed inset-0 z-[500] flex items-center justify-center p-6 bg-slate-950/95 backdrop-blur-xl animate-in fade-in">
+      <div className="glass-card p-10 md:p-16 rounded-[3rem] w-full max-w-lg text-center border-2 border-emerald-500 shadow-2xl animate-in zoom-in-95">
         <BellRing size={60} className="text-emerald-500 mx-auto mb-6 animate-bounce" />
-        <h2 className="text-3xl font-black mb-2 text-white tracking-tight">Waktu Laporan Tiba!</h2>
-        <p className="text-xs font-bold uppercase tracking-widest text-emerald-400 mb-10 leading-relaxed">Sistem mendeteksi jadwal pengiriman Laporan WA otomatis pada pukul {waConfig.time} WITA.</p>
-        
-        <button onClick={handleSend} className="w-full py-6 bg-emerald-600 text-white rounded-3xl font-black uppercase text-sm mb-4 shadow-[0_0_40px_rgba(16,185,129,0.4)] hover:scale-105 transition-all btn-3d">
-          Kirim Laporan Sekarang
-        </button>
-        <button onClick={onClose} className="w-full py-4 text-slate-400 hover:text-white text-[10px] font-black uppercase transition-colors">
-          Tunda / Lewati Hari Ini
-        </button>
+        <h2 className="text-3xl font-black mb-2 text-white">Waktu Laporan!</h2>
+        <button onClick={handleSend} className="w-full py-6 bg-emerald-600 text-white rounded-3xl font-black uppercase text-sm mb-4 btn-3d mt-8">Kirim Laporan</button>
+        <button onClick={onClose} className="w-full py-4 text-slate-400 text-[10px] font-black uppercase">Lewati</button>
       </div>
     </div>
   );
 }
-
 
 // ==========================================
 // VIEW: GRAFIK KEHADIRAN (Analitik)
@@ -1049,60 +1002,79 @@ _Pesan ini dikirim secara otomatis melalui sistem SATU-KALA._`);
 function AnalitikView({ allHistory, pegawaiList }) {
   const today = formatDateIndo(new Date());
   const todayLogs = allHistory.filter(h => h.dateStr === today);
-  const hadir = pegawaiList.filter(p => todayLogs.some(l => l.username === p.nip)).length;
+  
+  const hadir = pegawaiList.filter(p => todayLogs.some(l => (l.type === 'Masuk' || l.type === 'Keluar') && l.username === p.nip)).length;
   const total = pegawaiList.length || 36;
   const pct = Math.round((hadir / total) * 100);
 
   const bidangs = ["KALAPAS", "Tata Usaha", "KPLP", "Adm Kamtib", "Binadikgiatja"];
   const chartData = bidangs.map(b => {
     const ps = pegawaiList.filter(p => p.bidang === b);
-    const hs = ps.filter(p => todayLogs.some(l => l.username === p.nip)).length;
+    const hs = ps.filter(p => todayLogs.some(l => (l.type === 'Masuk' || l.type === 'Keluar') && l.username === p.nip)).length;
     const persentase = ps.length > 0 ? Math.round((hs / ps.length) * 100) : 0;
     return { bidang: b, hadir: hs, total: ps.length, persentase };
+  });
+
+  const listKhusus = pegawaiList.filter(p => {
+    const l = todayLogs.find(log => log.username === p.nip);
+    return l && ['Sakit', 'Cuti', 'Dinas Luar', 'Lepas Piket', 'BKO'].includes(l.type);
+  }).map(p => {
+    const l = todayLogs.find(log => log.username === p.nip);
+    return { nama: p.nama, type: l.type };
   });
 
   return (
     <div className="space-y-8">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {[{ l: 'Kehadiran Total', v: hadir, c: 'text-emerald-600' }, { l: 'Absensi/Kosong', v: total-hadir, c: 'text-rose-600' }, { l: 'Persentase', v: pct+'%', c: 'text-blue-600' }].map(s => (
+        {[{ l: 'Hadir (Masuk/Keluar)', v: hadir, c: 'text-emerald-600' }, { l: 'Total Personel', v: total, c: 'text-slate-600 dark:text-white' }, { l: 'Persentase Real', v: pct+'%', c: 'text-blue-600' }].map(s => (
           <div key={s.l} className="glass-card p-10 rounded-[2.5rem] text-center shadow-xl"><p className="text-[9px] font-black uppercase text-slate-700 dark:text-slate-500 mb-4">{s.l}</p><p className={`text-6xl font-black ${s.c}`}>{s.v}</p></div>
         ))}
       </div>
 
       <div className="glass-card p-8 md:p-10 rounded-[3rem] shadow-2xl">
         <h3 className="text-[10px] font-black uppercase text-slate-700 dark:text-slate-500 mb-8 tracking-widest flex items-center gap-2">
-          <BarChart3 size={16} className="text-blue-600"/> Grafik Infografis Kehadiran Per Bidang (Hari Ini)
+          <BarChart3 size={16} className="text-blue-600"/> Grafik Kehadiran Aktif Per Bidang
         </h3>
         <div className="space-y-6">
           {chartData.map((data, idx) => (
             <div key={idx} className="relative">
               <div className="flex justify-between font-black uppercase text-[10px] mb-2 text-slate-950 dark:text-white">
                 <span>{data.bidang}</span>
-                <span className="text-blue-600">{data.hadir} dari {data.total} Personel ({data.persentase}%)</span>
+                <span className="text-blue-600">{data.hadir} dari {data.total} ({data.persentase}%)</span>
               </div>
               <div className="h-4 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden shadow-inner flex">
-                <div 
-                  className="h-full bg-blue-600 transition-all duration-1000 ease-out flex items-center justify-end pr-2" 
-                  style={{ width: `${data.persentase}%` }}
-                >
-                </div>
+                <div className="h-full bg-blue-600 transition-all duration-1000 ease-out" style={{ width: `${data.persentase}%` }}></div>
               </div>
             </div>
           ))}
         </div>
       </div>
+
+      {listKhusus.length > 0 && (
+        <div className="glass-card p-8 rounded-[2rem] border-l-4 border-amber-500 bg-amber-50/30 dark:bg-amber-900/10">
+          <h3 className="text-sm font-black uppercase text-amber-700 dark:text-amber-500 mb-4 flex items-center gap-2"><User size={16}/> Daftar Personel Status Khusus</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {listKhusus.map((k, i) => (
+              <div key={i} className="flex justify-between items-center bg-white/50 dark:bg-slate-900/50 p-3 rounded-xl border border-amber-200/50 dark:border-amber-700/30">
+                <span className="text-[10px] font-bold text-slate-800 dark:text-slate-300 uppercase">{k.nama}</span>
+                <span className="text-[8px] font-black bg-amber-100 dark:bg-amber-900/50 text-amber-600 px-2 py-1 rounded-full uppercase">{k.type}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 // ==========================================
-// VIEW: KELOLA PEGAWAI (Update: Tambah & Impor)
+// VIEW: KELOLA PEGAWAI & LUPA PASSWORD
 // ==========================================
-function KelolaView({ pegawaiList, showToast, db, appId, credentials }) {
+function KelolaView({ pegawaiList, passRequests, showToast, db, appId, credentials }) {
   const [loading, setLoading] = useState(false);
   const [previewData, setPreviewData] = useState(null);
   const [targetPassUser, setTargetPassUser] = useState(null); 
-  const [showAddModal, setShowAddModal] = useState(false); // Modal Tambah Manual
+  const [showAddModal, setShowAddModal] = useState(false); 
   const [confirmDialog, setConfirmDialog] = useState(null);
   const fileInputRef = useRef(null);
 
@@ -1145,6 +1117,32 @@ function KelolaView({ pegawaiList, showToast, db, appId, credentials }) {
     { nip: "200211252025062006", nama: "MARIA HERLINA SASI", bidang: "Binadikgiatja", jabatan: "STAF REGISTRASI" }
   ];
 
+  const handleImportCSV = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (!file.name.endsWith('.csv')) { showToast("Harap gunakan file Excel yang disimpan sebagai .csv", "error"); return; }
+    
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const text = event.target.result;
+      const lines = text.split('\n');
+      const parsedData = [];
+      
+      for (let i = 1; i < lines.length; i++) {
+        if (!lines[i].trim()) continue;
+        const cols = lines[i].split(',').map(c => c.replace(/"/g, '').trim());
+        if (cols.length >= 3) {
+          parsedData.push({ nip: cols[0], nama: cols[1], bidang: cols[2], jabatan: cols[3] || 'Staf' });
+        }
+      }
+      
+      if (parsedData.length > 0) setPreviewData(parsedData);
+      else showToast("Format file kosong atau tidak valid", "error");
+    };
+    reader.readAsText(file);
+    e.target.value = null; // Reset input
+  };
+
   const handleGenerate = async () => {
     setLoading(true);
     try {
@@ -1161,76 +1159,48 @@ function KelolaView({ pegawaiList, showToast, db, appId, credentials }) {
     finally { setLoading(false); setPreviewData(null); }
   };
 
-  const handleImportCSV = (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    if (!file.name.endsWith('.csv')) {
-      showToast("Harap gunakan file CSV (Simpan Excel sebagai .csv)", "error");
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const text = event.target.result;
-      const lines = text.split('\n');
-      const parsedData = [];
-
-      // Mulai dari baris 1 (mengabaikan header baris 0)
-      for (let i = 1; i < lines.length; i++) {
-        if (!lines[i].trim()) continue;
-        // Asumsi format CSV standar: NIP, Nama, Bidang, Jabatan
-        const cols = lines[i].split(',').map(c => c.replace(/"/g, '').trim());
-        if (cols.length >= 3) {
-          parsedData.push({
-            nip: cols[0],
-            nama: cols[1],
-            bidang: cols[2],
-            jabatan: cols[3] || 'Staf'
-          });
-        }
-      }
-
-      if (parsedData.length > 0) {
-        setPreviewData(parsedData); // Tampilkan pratinjau sebelum commit
-      } else {
-        showToast("Format file kosong atau tidak valid", "error");
-      }
-    };
-    reader.readAsText(file);
-    e.target.value = null; // Reset input
-  };
-
   const exportToExcel = () => {
-    if (pegawaiList.length === 0) return showToast("Tidak ada data untuk diekspor", "error");
     let csv = "NIP,Nama,Bidang,Jabatan\n";
-    pegawaiList.forEach(p => {
-      csv += `"${p.nip}","${p.nama}","${p.bidang}","${p.jabatan || '-'}"\n`;
-    });
+    pegawaiList.forEach(p => { csv += `"${p.nip}","${p.nama}","${p.bidang}","${p.jabatan || '-'}"\n`; });
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `Data_Pegawai_SatuKala.csv`; a.click();
-    showToast("Data diekspor ke Excel!");
+    const a = document.createElement('a'); a.href = window.URL.createObjectURL(blob); a.download = `Data_Pegawai_SatuLakal.csv`; a.click(); showToast("Diekspor!");
   };
 
   const exportToWord = () => {
-    if (pegawaiList.length === 0) return showToast("Tidak ada data untuk diekspor", "error");
+    if (pegawaiList.length === 0) return showToast("Tidak ada data", "error");
     let tableRows = pegawaiList.map(p => `<tr><td style="border: 1px solid black; padding: 5px;">${p.nip}</td><td style="border: 1px solid black; padding: 5px;">${p.nama}</td><td style="border: 1px solid black; padding: 5px;">${p.bidang}</td><td style="border: 1px solid black; padding: 5px;">${p.jabatan || '-'}</td></tr>`).join('');
-    let html = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
-    <head><meta charset='utf-8'><title>Data Pegawai</title></head><body>
-    <h2 style="text-align: center; font-family: sans-serif;">Data Pegawai Lapas Kalabahi</h2>
-    <table style="border-collapse: collapse; width: 100%; font-family: sans-serif; font-size: 12px;">
-      <thead><tr><th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">NIP</th><th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">Nama</th><th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">Bidang</th><th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">Jabatan</th></tr></thead>
-      <tbody>${tableRows}</tbody>
-    </table></body></html>`;
+    let html = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Data Pegawai</title></head><body><h2 style="text-align: center; font-family: sans-serif;">Data Pegawai Lapas Kalabahi</h2><table style="border-collapse: collapse; width: 100%; font-family: sans-serif; font-size: 12px;"><thead><tr><th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">NIP</th><th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">Nama</th><th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">Bidang</th><th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">Jabatan</th></tr></thead><tbody>${tableRows}</tbody></table></body></html>`;
     const blob = new Blob(['\ufeff', html], { type: 'application/msword' });
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a'); a.href = url; a.download = `Data_Pegawai_SatuKala.doc`; a.click();
-    showToast("Data diekspor ke Word!");
+    const a = document.createElement('a'); a.href = window.URL.createObjectURL(blob); a.download = `Data_Pegawai_SatuLakal.doc`; a.click(); showToast("Diekspor ke Word!");
+  };
+
+  const handleResetRequest = async (req) => {
+    try {
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'credentials', req.nip), { username: req.nip, password: '123456', updatedAt: Date.now() });
+      await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'password_requests', req.id));
+      showToast(`Sandi ${req.nama} direset ke 123456!`);
+    } catch (err) { showToast("Gagal mereset", "error"); }
   };
 
   return (
     <div className="space-y-8">
+      {passRequests.length > 0 && (
+        <div className="glass-card p-6 rounded-3xl border-l-4 border-amber-500 shadow-xl bg-amber-50/50 dark:bg-amber-900/10 mb-8">
+          <h3 className="text-sm font-black text-amber-700 dark:text-amber-500 mb-4 flex items-center gap-2"><AlertTriangle size={18}/> Permintaan Reset Password</h3>
+          <div className="space-y-3">
+            {passRequests.map(r => (
+              <div key={r.id} className="flex flex-col md:flex-row justify-between md:items-center bg-white dark:bg-slate-900 p-4 rounded-xl shadow-sm gap-4 border border-slate-100 dark:border-slate-800">
+                <div><p className="font-bold text-xs text-slate-900 dark:text-white">{r.nama}</p><p className="text-[9px] text-slate-500 uppercase mt-1">NIP: {r.nip}</p></div>
+                <div className="flex gap-2">
+                  <button onClick={() => deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'password_requests', r.id))} className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-lg text-[9px] font-black uppercase hover:bg-slate-200">Tolak</button>
+                  <button onClick={() => setConfirmDialog({ title: "Setujui Reset?", message: `Reset sandi ${r.nama} menjadi 123456?`, onConfirm: () => { setConfirmDialog(null); handleResetRequest(r); }})} className="px-4 py-2 bg-amber-500 text-white rounded-lg text-[9px] font-black uppercase shadow-lg shadow-amber-500/30">Setujui & Reset</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white dark:bg-slate-900 p-8 rounded-3xl shadow-lg border border-white/5 gap-6">
         <div>
           <h3 className="text-2xl font-black text-slate-950 dark:text-white">Database Pegawai</h3>
@@ -1239,23 +1209,15 @@ function KelolaView({ pegawaiList, showToast, db, appId, credentials }) {
         <div className="flex flex-wrap gap-3 w-full md:w-auto">
           {/* Input Hidden untuk Impor File */}
           <input type="file" accept=".csv" ref={fileInputRef} onChange={handleImportCSV} className="hidden" />
+
+          <button onClick={() => setPreviewData(dataAwal)} className="px-5 py-4 bg-purple-600 text-white rounded-2xl font-black uppercase text-[9px] btn-3d shadow-xl flex items-center gap-2"><Wand2 size={14}/> Sinkronisasi</button>
+          <button onClick={() => setShowAddModal(true)} className="px-5 py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[9px] btn-3d shadow-xl flex items-center gap-2"><Plus size={14}/> Tambah Personel</button>
           
-          <button onClick={() => setPreviewData(dataAwal)} className="flex-1 md:flex-none px-5 py-4 bg-purple-600 text-white rounded-2xl font-black uppercase text-[9px] btn-3d shadow-xl flex items-center justify-center gap-2">
-            <Wand2 size={14}/> Sinkronisasi
-          </button>
-          <button onClick={() => setShowAddModal(true)} className="flex-1 md:flex-none px-5 py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[9px] btn-3d shadow-xl flex items-center justify-center gap-2">
-            <Plus size={14}/> Tambah Personel
-          </button>
-          <button onClick={() => fileInputRef.current.click()} className="flex-1 md:flex-none px-5 py-4 bg-slate-800 text-white rounded-2xl font-black uppercase text-[9px] btn-3d shadow-xl flex items-center justify-center gap-2">
-            <Upload size={14}/> Impor File (CSV)
-          </button>
           <div className="h-full w-px bg-slate-200 dark:bg-slate-700 hidden md:block mx-1"></div>
-          <button onClick={exportToExcel} className="flex-1 md:flex-none px-4 py-4 bg-emerald-600 text-white rounded-2xl font-black uppercase text-[9px] btn-3d flex items-center justify-center gap-2">
-            <FileSpreadsheet size={14}/> Excel
-          </button>
-          <button onClick={exportToWord} className="flex-1 md:flex-none px-4 py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[9px] btn-3d flex items-center justify-center gap-2">
-            <FileText size={14}/> Word
-          </button>
+
+          <button onClick={() => fileInputRef.current.click()} className="px-4 py-4 bg-slate-800 text-white rounded-2xl font-black uppercase text-[9px] btn-3d flex items-center gap-2"><Upload size={14}/> Impor CSV</button>
+          <button onClick={exportToExcel} className="px-4 py-4 bg-emerald-600 text-white rounded-2xl font-black uppercase text-[9px] btn-3d flex items-center gap-2"><FileSpreadsheet size={14}/> Excel</button>
+          <button onClick={exportToWord} className="px-4 py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[9px] btn-3d flex items-center gap-2"><FileText size={14}/> Word</button>
         </div>
       </div>
       
@@ -1265,159 +1227,72 @@ function KelolaView({ pegawaiList, showToast, db, appId, credentials }) {
             <div className="text-left"><p className="font-black text-sm text-slate-950 dark:text-white leading-none">{p.nama}</p><p className="text-[9px] font-bold text-slate-600 dark:text-slate-400 mt-2 uppercase">{p.nip} | <span className="text-blue-600">{p.bidang}</span></p></div>
             <div className="flex gap-2 shrink-0">
               <button onClick={() => setTargetPassUser(p)} className="p-3 bg-amber-50 dark:bg-amber-900/20 text-amber-600 rounded-xl" title="Lihat/Ubah Sandi"><Key size={14}/></button>
-              <button onClick={() => setConfirmDialog({
-                title: "Hapus Personel",
-                message: `Anda yakin ingin menghapus data pegawai ${p.nama}?`,
-                isDanger: true,
-                onConfirm: async () => {
-                  setConfirmDialog(null);
-                  await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pegawai', p.id));
-                  showToast("Pegawai berhasil dihapus");
-                }
-              })} className="p-3 bg-rose-50 dark:bg-rose-900/20 text-rose-600 rounded-xl"><Trash2 size={14}/></button>
+              <button onClick={() => setConfirmDialog({ title: "Hapus Personel", message: `Yakin ingin menghapus ${p.nama}?`, isDanger: true, onConfirm: async () => { setConfirmDialog(null); await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pegawai', p.id)); showToast("Pegawai dihapus"); } })} className="p-3 bg-rose-50 dark:bg-rose-900/20 text-rose-600 rounded-xl"><Trash2 size={14}/></button>
             </div>
           </div>
         ))}
       </div>
-      
-      {/* Modal Sinkronisasi / Impor */}
+
       {previewData && (
         <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md">
-          <div className="glass-card w-full max-w-2xl max-h-[80vh] rounded-[3rem] overflow-hidden flex flex-col border border-white/10">
-            <div className="p-10 border-b border-white/10 flex justify-between items-center text-white"><div><h3 className="text-2xl font-black">Pratinjau Impor Data</h3><p className="text-[9px] uppercase mt-2">Daftar Pegawai yang akan ditambahkan ({previewData.length} Data)</p></div><button onClick={() => setPreviewData(null)}><X size={24}/></button></div>
+          <div className="glass-card w-full max-w-2xl max-h-[80vh] rounded-[3rem] overflow-hidden flex flex-col">
+            <div className="p-10 border-b border-white/10 flex justify-between items-center text-white"><div><h3 className="text-2xl font-black">Pratinjau Impor</h3></div><button onClick={() => setPreviewData(null)}><X size={24}/></button></div>
             <div className="flex-1 overflow-y-auto p-10 space-y-3 bg-slate-900/30">
-              {previewData.slice(0, 50).map((p, i) => (
-                <div key={i} className="p-4 bg-white/5 rounded-2xl border border-white/5 text-left"><p className="text-white font-bold text-xs">{p.nama}</p><p className="text-[9px] text-slate-500 mt-1 uppercase">NIP: {p.nip} | {p.bidang}</p></div>
-              ))}
-              {previewData.length > 50 && <p className="text-xs text-center text-slate-500 font-bold mt-4">... dan {previewData.length - 50} data lainnya.</p>}
+              {previewData.slice(0, 50).map((p, i) => <div key={i} className="p-4 bg-white/5 rounded-2xl border border-white/5 text-left"><p className="text-white font-bold text-xs">{p.nama}</p><p className="text-[9px] text-slate-500 mt-1 uppercase">NIP: {p.nip}</p></div>)}
             </div>
-            <div className="p-10 border-t border-white/10 flex justify-end gap-4"><button onClick={() => setPreviewData(null)} className="text-slate-400 font-black uppercase text-[9px]">Batal</button><button onClick={handleGenerate} disabled={loading} className="px-10 py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[9px] btn-3d shadow-xl shadow-blue-600/30">{loading ? 'Proses...' : 'Konfirmasi Impor'}</button></div>
+            <div className="p-10 flex justify-end gap-4"><button onClick={() => setPreviewData(null)} className="text-slate-400 font-black uppercase text-[9px]">Batal</button><button onClick={handleGenerate} className="px-10 py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[9px] btn-3d">Konfirmasi Impor</button></div>
           </div>
         </div>
       )}
 
-      {/* Modal Tambah Manual */}
-      {showAddModal && (
-        <AddPegawaiModal db={db} appId={appId} showToast={showToast} onClose={() => setShowAddModal(false)} />
-      )}
-
-      {/* Modal Ubah Sandi Pegawai oleh Admin */}
-      {targetPassUser && (
-        <AdminEditPasswordModal targetUser={targetPassUser} credentials={credentials} db={db} appId={appId} onClose={() => setTargetPassUser(null)} showToast={showToast} />
-      )}
-
+      {showAddModal && <AddPegawaiModal db={db} appId={appId} showToast={showToast} onClose={() => setShowAddModal(false)} />}
+      {targetPassUser && <AdminEditPasswordModal targetUser={targetPassUser} credentials={credentials} db={db} appId={appId} onClose={() => setTargetPassUser(null)} showToast={showToast} />}
       {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
     </div>
   );
 }
 
-// Modal Khusus Tambah Pegawai Manual
 function AddPegawaiModal({ db, appId, onClose, showToast }) {
-  const [nip, setNip] = useState('');
-  const [nama, setNama] = useState('');
-  const [bidang, setBidang] = useState('Tata Usaha');
-  const [jabatan, setJabatan] = useState('');
-  const [loading, setLoading] = useState(false);
-
+  const [nip, setNip] = useState(''); const [nama, setNama] = useState(''); const [bidang, setBidang] = useState('Tata Usaha'); const [jabatan, setJabatan] = useState(''); const [loading, setLoading] = useState(false);
   const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!nip || !nama) return showToast("NIP dan Nama Wajib Diisi", "error");
-    setLoading(true);
-    try {
-      const cleanNip = nip.replace(/\s+/g, '');
-      const ref = doc(collection(db, 'artifacts', appId, 'public', 'data', 'pegawai'));
-      await setDoc(ref, { nip: cleanNip, nama, bidang, jabatan });
-      showToast("Personel berhasil ditambahkan!");
-      onClose();
-    } catch (error) {
-      showToast("Gagal menambahkan pegawai", "error");
-    } finally { setLoading(false); }
+    e.preventDefault(); if (!nip || !nama) return showToast("NIP dan Nama Wajib", "error"); setLoading(true);
+    try { await setDoc(doc(collection(db, 'artifacts', appId, 'public', 'data', 'pegawai')), { nip: nip.replace(/\s+/g, ''), nama, bidang, jabatan }); showToast("Ditambahkan!"); onClose(); } catch (error) { showToast("Gagal", "error"); } finally { setLoading(false); }
   };
-
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md">
       <div className="glass-card p-10 rounded-[3rem] max-w-sm w-full border border-white/10 shadow-2xl animate-in zoom-in">
         <UserPlus size={40} className="text-blue-500 mx-auto mb-4" />
-        <h2 className="text-xl font-black mb-1 text-center text-slate-950 dark:text-white">Tambah Personel</h2>
-        <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-6 text-center">Data Master Pegawai</p>
-        
+        <h2 className="text-xl font-black mb-6 text-center text-slate-950 dark:text-white">Tambah Personel</h2>
         <form onSubmit={handleSubmit} className="space-y-4 text-left">
-          <div className="space-y-1">
-            <label className="text-[8px] font-black uppercase text-slate-500 ml-2">NIP (Nomor Induk Pegawai)</label>
-            <input type="text" value={nip} onChange={(e) => setNip(e.target.value)} placeholder="Contoh: 1990..." className="w-full px-5 py-3 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs outline-none focus:ring-2 focus:ring-blue-500 font-bold dark:text-white shadow-inner text-slate-950" />
-          </div>
-          <div className="space-y-1">
-            <label className="text-[8px] font-black uppercase text-slate-500 ml-2">Nama Lengkap & Gelar</label>
-            <input type="text" value={nama} onChange={(e) => setNama(e.target.value)} placeholder="Nama Pegawai" className="w-full px-5 py-3 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs outline-none focus:ring-2 focus:ring-blue-500 font-bold dark:text-white shadow-inner text-slate-950" />
-          </div>
-          <div className="space-y-1">
-            <label className="text-[8px] font-black uppercase text-slate-500 ml-2">Bidang / Unit Kerja</label>
-            <select value={bidang} onChange={(e) => setBidang(e.target.value)} className="w-full p-3 bg-slate-100 dark:bg-slate-900 border-none rounded-2xl font-bold text-xs outline-none text-slate-950 dark:text-white shadow-inner">
-              {['KALAPAS', 'Tata Usaha', 'KPLP', 'Adm Kamtib', 'Binadikgiatja'].map(b => <option key={b} value={b}>{b}</option>)}
-            </select>
-          </div>
-          <div className="space-y-1">
-            <label className="text-[8px] font-black uppercase text-slate-500 ml-2">Jabatan</label>
-            <input type="text" value={jabatan} onChange={(e) => setJabatan(e.target.value)} placeholder="Contoh: Staf Kepegawaian" className="w-full px-5 py-3 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs outline-none focus:ring-2 focus:ring-blue-500 font-bold dark:text-white shadow-inner text-slate-950" />
-          </div>
-          <button type="submit" disabled={loading} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] mt-4 shadow-xl shadow-blue-600/30 hover:scale-[1.02] transition-transform btn-3d">{loading ? 'Menyimpan...' : 'Simpan Data Pegawai'}</button>
-          <button type="button" onClick={onClose} className="w-full py-2 text-slate-600 text-[9px] font-black uppercase mt-2">Batal</button>
+          <input type="text" value={nip} onChange={e=>setNip(e.target.value)} placeholder="NIP Pegawai" className="w-full px-5 py-3 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold" />
+          <input type="text" value={nama} onChange={e=>setNama(e.target.value)} placeholder="Nama Lengkap" className="w-full px-5 py-3 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold" />
+          <select value={bidang} onChange={e=>setBidang(e.target.value)} className="w-full p-3 bg-slate-100 dark:bg-slate-900 rounded-2xl font-bold text-xs">{['KALAPAS', 'Tata Usaha', 'KPLP', 'Adm Kamtib', 'Binadikgiatja'].map(b => <option key={b} value={b}>{b}</option>)}</select>
+          <button type="submit" disabled={loading} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] btn-3d mt-4">Simpan</button>
+          <button type="button" onClick={onClose} className="w-full py-2 text-slate-600 text-[9px] font-black uppercase">Batal</button>
         </form>
       </div>
     </div>
   );
 }
 
-// Modal Khusus Admin Mengubah Sandi Pegawai
 function AdminEditPasswordModal({ targetUser, credentials, db, appId, onClose, showToast }) {
-  const cred = credentials.find(c => c.username === targetUser.nip);
-  const currentPass = cred?.password || '123456';
-  
-  const [newPass, setNewPass] = useState(currentPass);
-  const [showPass, setShowPass] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [confirmDialog, setConfirmDialog] = useState(null);
-
+  const [newPass, setNewPass] = useState('123456'); const [showPass, setShowPass] = useState(false); const [confirmDialog, setConfirmDialog] = useState(null);
   const handleUpdateClick = (e) => {
-    e.preventDefault();
-    if (!newPass) return showToast("Sandi tidak boleh kosong", "error");
-
-    setConfirmDialog({
-      title: "KONFIRMASI ADMIN",
-      message: `Anda yakin ingin mengubah kata sandi untuk akun milik:\n${targetUser.nama}?`,
-      isDanger: true,
-      onConfirm: () => {
-        setConfirmDialog(null);
-        executeUpdate();
-      }
-    });
+    e.preventDefault(); if (!newPass) return;
+    setConfirmDialog({ title: "Konfirmasi Admin", message: `Ubah sandi untuk ${targetUser.nama}?`, isDanger: true, onConfirm: async () => { setConfirmDialog(null); try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'credentials', targetUser.nip), { username: targetUser.nip, password: newPass, updatedAt: Date.now() }); showToast("Sandi diperbarui!"); onClose(); } catch (err) {} } });
   };
-
-  const executeUpdate = async () => {
-    setLoading(true);
-    try {
-      const ref = doc(db, 'artifacts', appId, 'public', 'data', 'credentials', targetUser.nip);
-      await setDoc(ref, { username: targetUser.nip, password: newPass, updatedAt: Date.now() });
-      showToast(`Sandi untuk ${targetUser.nama} berhasil diperbarui!`); 
-      onClose();
-    } catch (err) { showToast("Gagal memperbarui sandi", "error"); } 
-    finally { setLoading(false); }
-  };
-
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md">
       <div className="glass-card p-10 rounded-[3rem] max-w-sm w-full text-center border border-white/10 shadow-2xl animate-in zoom-in">
         <Lock size={40} className="text-amber-500 mx-auto mb-4" />
-        <h2 className="text-xl font-black mb-1 text-slate-950 dark:text-white">Akses Admin</h2>
-        <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-8 leading-relaxed">Kelola Sandi: {targetUser.nama}</p>
-        
+        <h2 className="text-xl font-black mb-8 text-slate-950 dark:text-white">Akses Admin</h2>
         <form onSubmit={handleUpdateClick} className="space-y-4 text-left">
           <div className="relative">
-            <input type={showPass ? "text" : "password"} value={newPass} onChange={(e) => setNewPass(e.target.value)} className="w-full pl-5 pr-12 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs outline-none focus:ring-2 focus:ring-amber-500 font-bold dark:text-white shadow-inner text-slate-950" />
-            <button type="button" onClick={() => setShowPass(!showPass)} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-amber-500">{showPass ? <EyeOff size={16}/> : <Eye size={16}/>}</button>
+            <input type={showPass?"text":"password"} value={newPass} onChange={e=>setNewPass(e.target.value)} className="w-full pl-5 pr-12 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold" />
+            <button type="button" onClick={()=>setShowPass(!showPass)} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400">{showPass ? <EyeOff size={16}/> : <Eye size={16}/>}</button>
           </div>
-          <button type="submit" disabled={loading} className="w-full py-5 bg-amber-500 text-white rounded-2xl font-black uppercase text-[10px] mt-4 shadow-xl shadow-amber-500/30 hover:scale-[1.02] transition-transform">{loading ? 'Menyimpan...' : 'Simpan Sandi Baru'}</button>
-          <button type="button" onClick={onClose} className="w-full py-2 text-slate-600 text-[9px] font-black uppercase mt-2">Batal</button>
+          <button type="submit" className="w-full py-5 bg-amber-500 text-white rounded-2xl font-black uppercase text-[10px] btn-3d">Simpan Sandi Baru</button>
+          <button type="button" onClick={onClose} className="w-full py-2 text-slate-600 text-[9px] font-black uppercase">Batal</button>
         </form>
       </div>
       {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
@@ -1425,78 +1300,26 @@ function AdminEditPasswordModal({ targetUser, credentials, db, appId, onClose, s
   );
 }
 
-// ==========================================
-// MODAL: UBAH SANDI (PRIBADI)
-// ==========================================
 function PasswordModal({ currentUser, credentials, db, appId, onClose, showToast }) {
-  const [oldPass, setOldPass] = useState('');
-  const [newPass, setNewPass] = useState('');
-  const [confirmPass, setConfirmPass] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [showPassMap, setShowPassMap] = useState({ old: false, new: false, confirm: false }); 
+  const [oldPass, setOldPass] = useState(''); const [newPass, setNewPass] = useState(''); const [confirmPass, setConfirmPass] = useState('');
   const [confirmDialog, setConfirmDialog] = useState(null);
-
-  const toggleShow = (field) => setShowPassMap(prev => ({ ...prev, [field]: !prev[field] }));
-
   const handleUpdateClick = (e) => {
-    e.preventDefault();
-    if (newPass !== confirmPass) return showToast("Konfirmasi password tidak cocok", "error");
+    e.preventDefault(); if (newPass !== confirmPass) return showToast("Konfirmasi tidak cocok", "error");
     const cred = credentials.find(c => c.username === currentUser.rawUsername);
-    const exp = cred?.password || (currentUser.rawUsername === '2001' ? 'november' : '123456');
-    if (oldPass !== exp) return showToast("Password lama yang dimasukkan salah", "error");
-
-    setConfirmDialog({
-      title: "PENGATURAN KEAMANAN",
-      message: "Apakah Anda yakin ingin menyimpan password baru Anda?",
-      onConfirm: () => {
-        setConfirmDialog(null);
-        executeUpdate();
-      }
-    });
+    if (oldPass !== (cred?.password || '123456')) return showToast("Sandi lama salah", "error");
+    setConfirmDialog({ title: "Keamanan", message: "Simpan password baru?", onConfirm: async () => { setConfirmDialog(null); try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'credentials', currentUser.rawUsername), { username: currentUser.rawUsername, password: newPass, updatedAt: Date.now() }); showToast("Berhasil!"); onClose(); } catch (err) {} } });
   };
-
-  const executeUpdate = async () => {
-    setLoading(true);
-    try {
-      const ref = doc(db, 'artifacts', appId, 'public', 'data', 'credentials', currentUser.rawUsername);
-      await setDoc(ref, { username: currentUser.rawUsername, password: newPass, updatedAt: Date.now() });
-      showToast("Password Berhasil Diperbarui!"); onClose();
-    } catch (err) { showToast("Gagal memperbarui password", "error"); } finally { setLoading(false); }
-  };
-
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md">
       <div className="glass-card p-10 rounded-[3rem] max-w-sm w-full text-center border border-white/10 shadow-2xl animate-in zoom-in">
         <Key size={40} className="text-blue-500 mx-auto mb-6" />
         <h2 className="text-2xl font-black mb-8 text-slate-950 dark:text-white">Ubah Password</h2>
         <form onSubmit={handleUpdateClick} className="space-y-4 text-left">
-          
-          <div className="space-y-1 relative">
-            <label className="text-[8px] font-black uppercase text-slate-500 ml-2">Password Lama</label>
-            <div className="relative">
-              <input type={showPassMap.old ? "text" : "password"} value={oldPass} onChange={(e) => setOldPass(e.target.value)} placeholder="Masukkan Password Lama" className="w-full pl-5 pr-12 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs outline-none focus:ring-2 focus:ring-blue-500 font-bold dark:text-white shadow-inner text-slate-950" />
-              <button type="button" onClick={() => toggleShow('old')} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-500">{showPassMap.old ? <EyeOff size={16}/> : <Eye size={16}/>}</button>
-            </div>
-          </div>
-
-          <div className="space-y-1 relative">
-            <label className="text-[8px] font-black uppercase text-slate-500 ml-2">Password Baru</label>
-            <div className="relative">
-              <input type={showPassMap.new ? "text" : "password"} value={newPass} onChange={(e) => setNewPass(e.target.value)} placeholder="Masukkan Password Baru" className="w-full pl-5 pr-12 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs outline-none focus:ring-2 focus:ring-blue-500 font-bold dark:text-white shadow-inner text-slate-950" />
-              <button type="button" onClick={() => toggleShow('new')} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-500">{showPassMap.new ? <EyeOff size={16}/> : <Eye size={16}/>}</button>
-            </div>
-          </div>
-
-          <div className="space-y-1 relative">
-            <label className="text-[8px] font-black uppercase text-slate-500 ml-2">Konfirmasi Password Baru</label>
-            <div className="relative">
-              <input type={showPassMap.confirm ? "text" : "password"} value={confirmPass} onChange={(e) => setConfirmPass(e.target.value)} placeholder="Ketik Ulang Password Baru" className="w-full pl-5 pr-12 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs outline-none focus:ring-2 focus:ring-blue-500 font-bold dark:text-white shadow-inner text-slate-950" />
-              <button type="button" onClick={() => toggleShow('confirm')} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-500">{showPassMap.confirm ? <EyeOff size={16}/> : <Eye size={16}/>}</button>
-            </div>
-          </div>
-
-          <button type="submit" disabled={loading} className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] mt-4 btn-3d shadow-xl shadow-blue-600/30">{loading ? 'Memproses...' : 'Simpan Perubahan Password'}</button>
-          <button type="button" onClick={onClose} className="w-full py-2 text-slate-600 text-[9px] font-black uppercase mt-2">Batal</button>
+          <div><label className="text-[8px] font-black uppercase ml-2 text-slate-500">Sandi Lama</label><input type="password" value={oldPass} onChange={e=>setOldPass(e.target.value)} className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold mt-1" /></div>
+          <div><label className="text-[8px] font-black uppercase ml-2 text-slate-500">Sandi Baru</label><input type="password" value={newPass} onChange={e=>setNewPass(e.target.value)} className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold mt-1" /></div>
+          <div><label className="text-[8px] font-black uppercase ml-2 text-slate-500">Ulangi Sandi Baru</label><input type="password" value={confirmPass} onChange={e=>setConfirmPass(e.target.value)} className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold mt-1" /></div>
+          <button type="submit" className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] btn-3d mt-4">Simpan Perubahan</button>
+          <button type="button" onClick={onClose} className="w-full py-2 text-slate-600 text-[9px] font-black uppercase">Batal</button>
         </form>
       </div>
       {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
@@ -1504,138 +1327,138 @@ function PasswordModal({ currentUser, credentials, db, appId, onClose, showToast
   );
 }
 
-// ==========================================
-// VIEW: RIWAYAT LIST (RIWAYAT ABSENSI)
-// ==========================================
 function HistoryList({ history, currentUser, db, appId, showToast }) {
-  const [editingLog, setEditingLog] = useState(null);
-  const [confirmDialog, setConfirmDialog] = useState(null);
-
-  const handleDeleteClick = (id) => {
-    setConfirmDialog({
-      title: "Hapus Log Absensi",
-      message: "Peringatan Admin: Yakin ingin MENGHAPUS log absensi ini?",
-      isDanger: true,
-      onConfirm: async () => {
-        setConfirmDialog(null);
-        try {
-          await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'absensi', id));
-          showToast("Log absensi berhasil dihapus!", "success");
-        } catch (err) {
-          showToast("Gagal menghapus log", "error");
-        }
-      }
-    });
-  };
-
-  if (history.length === 0) return <div className="p-20 text-center opacity-30"><History size={60} className="mx-auto mb-6 text-slate-400" /><p className="text-[9px] font-black uppercase tracking-widest leading-loose text-slate-600">Log harian kosong</p></div>;
-  
-  const displayLimit = currentUser.role === 'admin' ? 100 : 20;
-
+  const [editingLog, setEditingLog] = useState(null); const [confirmDialog, setConfirmDialog] = useState(null);
+  if (history.length === 0) return <div className="p-20 text-center opacity-30"><History size={60} className="mx-auto mb-6 text-slate-400" /><p className="text-[9px] font-black uppercase tracking-widest text-slate-600">Log harian kosong</p></div>;
   return (
     <div className="space-y-4">
-      {currentUser.role === 'admin' && (
-        <div className="p-4 bg-amber-100 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-700/50 rounded-2xl flex items-center gap-3 mb-6">
-          <AlertTriangle size={20} className="text-amber-600 dark:text-amber-500" />
-          <p className="text-[10px] font-bold text-amber-800 dark:text-amber-400 uppercase tracking-widest">Akses Admin: Menampilkan seluruh riwayat dan izinkan pengeditan</p>
-        </div>
-      )}
-
-      {history.slice(0, displayLimit).map(item => (
+      {currentUser.role === 'admin' && ( <div className="p-4 bg-amber-100 dark:bg-amber-900/30 rounded-2xl flex items-center gap-3 mb-6"><AlertTriangle size={20} className="text-amber-600" /><p className="text-[10px] font-bold text-amber-800 uppercase tracking-widest">Akses Admin: Mode Pengeditan Aktif</p></div> )}
+      {history.slice(0, currentUser.role === 'admin' ? 100 : 20).map(item => (
         <div key={item.id} className="p-5 glass-card rounded-2xl flex items-center justify-between border border-white/5 transition-transform hover:translate-x-1">
           <div className="flex items-center gap-5">
-            <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-black shrink-0 ${item.type === 'Masuk' ? 'bg-emerald-500/10 text-emerald-600' : (item.type === 'Sakit' || item.type === 'Cuti' ? 'bg-amber-500/10 text-amber-600' : 'bg-rose-500/10 text-rose-600')}`}>
+            <div className={`w-12 h-12 rounded-xl flex items-center justify-center font-black shrink-0 ${item.type === 'Masuk' ? 'bg-emerald-500/10 text-emerald-600' : (['Sakit','Cuti','BKO','Dinas Luar'].includes(item.type) ? 'bg-amber-500/10 text-amber-600' : 'bg-rose-500/10 text-rose-600')}`}>
               {item.type === 'Masuk' ? <LogIn size={20}/> : (item.type === 'Keluar' ? <LogOut size={20}/> : <FileText size={20}/>)}
             </div>
-            <div className="text-left">
-              <p className="font-black text-sm text-slate-950 dark:text-white leading-none">{item.displayName}</p>
-              <p className="text-[9px] font-bold text-slate-600 dark:text-slate-400 mt-2 uppercase flex items-center gap-2 leading-relaxed">
-                <span className="text-blue-600 font-black">{item.timeStr} WITA</span> | {item.dateStr} | {item.type}
-              </p>
-            </div>
+            <div className="text-left"><p className="font-black text-sm text-slate-950 dark:text-white leading-none">{item.displayName}</p><p className="text-[9px] font-bold text-slate-600 dark:text-slate-400 mt-2 uppercase flex items-center gap-2"><span className="text-blue-600 font-black">{item.timeStr} WITA</span> | {item.dateStr} | {item.type}</p></div>
           </div>
           <div className="flex items-center gap-3 shrink-0">
             {currentUser.role === 'admin' && (
               <div className="flex gap-2 mr-2">
-                <button onClick={() => setEditingLog(item)} className="p-2 bg-blue-50 dark:bg-blue-900/20 text-blue-600 rounded-lg" title="Edit Absensi"><Edit size={14}/></button>
-                <button onClick={() => handleDeleteClick(item.id)} className="p-2 bg-rose-50 dark:bg-rose-900/20 text-rose-600 rounded-lg" title="Hapus Absensi"><Trash2 size={14}/></button>
+                <button onClick={() => setEditingLog(item)} className="p-2 bg-blue-50 text-blue-600 rounded-lg"><Edit size={14}/></button>
+                <button onClick={() => setConfirmDialog({ title: "Hapus Log", message: "Yakin HAPUS log ini?", isDanger: true, onConfirm: async () => { setConfirmDialog(null); await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'absensi', item.id)); showToast("Dihapus"); }})} className="p-2 bg-rose-50 text-rose-600 rounded-lg"><Trash2 size={14}/></button>
               </div>
             )}
-            {item.photoStr ? <img src={item.photoStr} className="w-12 h-12 rounded-xl object-cover border border-slate-200 dark:border-slate-800 shadow-md" alt="Log" /> : <div className="w-12 h-12 rounded-xl bg-slate-200 dark:bg-slate-800 opacity-50 flex items-center justify-center"><User size={16} className="text-slate-400"/></div>}
+            {item.photoStr ? <img src={item.photoStr} className="w-12 h-12 rounded-xl object-cover" alt="Log" /> : <div className="w-12 h-12 rounded-xl bg-slate-200 dark:bg-slate-800 opacity-50 flex items-center justify-center"><User size={16} className="text-slate-400"/></div>}
           </div>
         </div>
       ))}
-
-      {editingLog && (
-        <AdminEditHistoryModal 
-          log={editingLog} 
-          db={db} 
-          appId={appId} 
-          onClose={() => setEditingLog(null)} 
-          showToast={showToast} 
-        />
-      )}
-      
+      {editingLog && <AdminEditHistoryModal log={editingLog} db={db} appId={appId} onClose={() => setEditingLog(null)} showToast={showToast} />}
       {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
     </div>
   );
 }
 
-// Modal Khusus Admin Mengubah Riwayat Absensi
 function AdminEditHistoryModal({ log, db, appId, onClose, showToast }) {
-  const [type, setType] = useState(log.type);
-  const [timeStr, setTimeStr] = useState(log.timeStr);
-  const [dateStr, setDateStr] = useState(log.dateStr);
-  const [loading, setLoading] = useState(false);
+  const [type, setType] = useState(log.type); 
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  // Ekstrak timestamp ke format input date standar YYYY-MM-DD
+  const dObj = new Date(log.timestamp || Date.now());
+  const yyyy = dObj.getFullYear();
+  const mm = String(dObj.getMonth() + 1).padStart(2, '0');
+  const dd = String(dObj.getDate()).padStart(2, '0');
+  
+  const initialDate = `${yyyy}-${mm}-${dd}`;
+  const [editStartDate, setEditStartDate] = useState(initialDate);
+  const [editEndDate, setEditEndDate] = useState(initialDate);
+  const [editTime, setEditTime] = useState(log.timeStr);
 
-  const handleUpdate = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      const ref = doc(db, 'artifacts', appId, 'public', 'data', 'absensi', log.id);
-      await updateDoc(ref, { type, timeStr, dateStr });
-      showToast("Data riwayat absensi berhasil diubah!");
-      onClose();
-    } catch (err) {
-      showToast("Gagal mengubah data absensi", "error");
+  const handleUpdate = async (e) => { 
+    e.preventDefault(); 
+    setIsSubmitting(true);
+    try { 
+      const start = new Date(editStartDate);
+      const end = new Date(editEndDate);
+
+      if (end < start) {
+        showToast("Tanggal selesai tidak boleh lebih awal dari tanggal mulai!", "error");
+        setIsSubmitting(false);
+        return;
+      }
+
+      const [hour, minute] = editTime.split(':').map(Number);
+      
+      let currentDate = new Date(start);
+      let isFirst = true;
+
+      // Loop untuk memproses rentang tanggal
+      while (currentDate <= end) {
+        const targetDate = new Date(currentDate);
+        targetDate.setHours(hour, minute, 0, 0);
+
+        const dateStr = formatDateIndo(targetDate);
+        const ts = targetDate.getTime();
+
+        if (isFirst) {
+          // Update log yang sedang diedit di hari pertama
+          await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'absensi', log.id), { 
+            type, timeStr: editTime, dateStr: dateStr, timestamp: ts
+          }); 
+          isFirst = false;
+        } else {
+          // Tambahkan duplikat log baru untuk hari-hari berikutnya
+          await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'absensi'), {
+            username: log.username, displayName: log.displayName, type,
+            timestamp: ts, dateStr: dateStr, timeStr: editTime, photoStr: log.photoStr || null,
+            location: log.location || { manual: true, lat: -8.219515, lng: 124.513346 },
+            distance: log.distance || 0,
+            deviceVerified: true, isServerSynced: true, antiManipulationEnabled: true, timezone: 'WITA', isAuto: true
+          });
+        }
+        
+        currentDate.setDate(currentDate.getDate() + 1); // Lanjut hari berikutnya
+      }
+
+      showToast(start.getTime() === end.getTime() ? "Pembaruan absensi berhasil!" : "Data massal berhasil dibuat!"); 
+      onClose(); 
+    } catch (err) { 
+      showToast("Gagal menyimpan perubahan", "error"); 
     } finally {
-      setLoading(false);
+      setIsSubmitting(false);
     }
   };
-
+  
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md">
-      <div className="glass-card p-10 rounded-[3rem] max-w-sm w-full text-center border border-white/10 shadow-2xl animate-in zoom-in">
-        <Edit size={40} className="text-blue-500 mx-auto mb-4" />
-        <h2 className="text-xl font-black mb-1 text-slate-950 dark:text-white">Edit Absensi</h2>
-        <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-6 leading-relaxed">Personel: {log.displayName}</p>
-        
+      <div className="glass-card p-10 rounded-[3rem] max-w-sm w-full text-center shadow-2xl animate-in zoom-in">
+        <Edit size={40} className="text-blue-500 mx-auto mb-4" /><h2 className="text-xl font-black mb-6 text-slate-950 dark:text-white">Edit Absensi</h2>
         <form onSubmit={handleUpdate} className="space-y-4 text-left">
           <div className="space-y-1">
-            <label className="text-[8px] font-black uppercase text-slate-500 ml-2">Status</label>
-            <select value={type} onChange={(e) => setType(e.target.value)} className="w-full p-4 bg-slate-100 dark:bg-slate-900 border-none rounded-2xl font-bold text-xs outline-none text-slate-950 dark:text-white shadow-inner">
-              {['Masuk', 'Keluar', 'Lepas Piket', 'Sakit', 'Cuti', 'Dinas Luar'].map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
+            <label className="text-[8px] font-black uppercase text-slate-500 ml-2">Pilih Status / Keterangan</label>
+            <select value={type} onChange={e=>setType(e.target.value)} className="w-full p-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold">{['Masuk','Keluar','Lepas Piket','Sakit','Cuti','Dinas Luar','BKO'].map(t=><option key={t} value={t}>{t}</option>)}</select>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <label className="text-[8px] font-black uppercase text-slate-500 ml-2">Tgl Mulai</label>
+              <input type="date" value={editStartDate} onChange={e=>setEditStartDate(e.target.value)} className="w-full px-4 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-[10px] font-bold uppercase dark:[color-scheme:dark]" />
+            </div>
+            <div className="space-y-1">
+              <label className="text-[8px] font-black uppercase text-slate-500 ml-2">Tgl Selesai</label>
+              <input type="date" value={editEndDate} onChange={e=>setEditEndDate(e.target.value)} min={editStartDate} className="w-full px-4 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-[10px] font-bold uppercase dark:[color-scheme:dark]" />
+            </div>
           </div>
           <div className="space-y-1">
-            <label className="text-[8px] font-black uppercase text-slate-500 ml-2">Jam (WITA)</label>
-            <input type="text" value={timeStr} onChange={(e) => setTimeStr(e.target.value)} className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs outline-none font-bold dark:text-white shadow-inner text-slate-950" />
+            <label className="text-[8px] font-black uppercase text-slate-500 ml-2">Tentukan Waktu/Jam</label>
+            <input type="time" value={editTime} onChange={e=>setEditTime(e.target.value)} className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold dark:[color-scheme:dark]" />
           </div>
-          <div className="space-y-1">
-            <label className="text-[8px] font-black uppercase text-slate-500 ml-2">Tanggal (Format Indo)</label>
-            <input type="text" value={dateStr} onChange={(e) => setDateStr(e.target.value)} className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs outline-none font-bold dark:text-white shadow-inner text-slate-950" />
-          </div>
-          <button type="submit" disabled={loading} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] mt-4 shadow-xl shadow-blue-600/30 hover:scale-[1.02] transition-transform">{loading ? 'Menyimpan...' : 'Simpan Perubahan'}</button>
-          <button type="button" onClick={onClose} className="w-full py-2 text-slate-600 text-[9px] font-black uppercase mt-2">Batal</button>
+          <button type="submit" disabled={isSubmitting} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] btn-3d mt-4">{isSubmitting ? 'Menyimpan...' : 'Simpan Perubahan'}</button>
+          <button type="button" onClick={onClose} disabled={isSubmitting} className="w-full py-2 text-slate-600 text-[9px] font-black uppercase">Batal</button>
         </form>
       </div>
     </div>
   );
 }
 
-// ==========================================
-// MODAL: KONFIRMASI UMUM (CUSTOM)
-// ==========================================
 function ConfirmModal({ title, message, onConfirm, onCancel, confirmText = "Ya, Lanjutkan", cancelText = "Batal", isDanger = false }) {
   return (
     <div className="fixed inset-0 z-[600] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md animate-in fade-in">
@@ -1644,12 +1467,8 @@ function ConfirmModal({ title, message, onConfirm, onCancel, confirmText = "Ya, 
         <h2 className="text-xl font-black mb-2 text-slate-950 dark:text-white">{title}</h2>
         <p className="text-[10px] font-bold text-slate-500 mb-6 leading-relaxed whitespace-pre-wrap">{message}</p>
         <div className="flex gap-3">
-          <button onClick={onCancel} className="flex-1 py-3 text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 rounded-xl font-black uppercase text-[9px] hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">
-            {cancelText}
-          </button>
-          <button onClick={onConfirm} className={`flex-1 py-3 text-white rounded-xl font-black uppercase text-[9px] btn-3d ${isDanger ? 'bg-rose-600 shadow-rose-600/30' : 'bg-blue-600 shadow-blue-600/30'}`}>
-            {confirmText}
-          </button>
+          <button onClick={onCancel} className="flex-1 py-3 text-slate-600 bg-slate-100 dark:bg-slate-800 rounded-xl font-black uppercase text-[9px] hover:bg-slate-200">Batal</button>
+          <button onClick={onConfirm} className={`flex-1 py-3 text-white rounded-xl font-black uppercase text-[9px] btn-3d ${isDanger ? 'bg-rose-600' : 'bg-blue-600'}`}>{confirmText}</button>
         </div>
       </div>
     </div>
