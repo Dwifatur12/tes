@@ -344,6 +344,7 @@ function MainDashboard({ currentUser, pegawaiList, allHistory, credentials, show
   const [activeTab, setActiveTab] = useState(currentUser.role === 'admin' ? 'rekap' : 'absen');
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [showPengumumanModal, setShowPengumumanModal] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState(null);
   
   // State untuk Fitur Auto WA
   const [waConfig, setWaConfig] = useState(() => {
@@ -432,9 +433,24 @@ function MainDashboard({ currentUser, pegawaiList, allHistory, credentials, show
                   {timeAnomaly ? "MANIPULASI TERDETEKSI" : (isTimeSynced ? "TERVERIFIKASI SERVER WITA" : "SINKRONISASI WAKTU...")}
                 </p>
               </div>
-              <button onClick={toggleDarkMode} className="p-3 bg-slate-100 dark:bg-slate-800 rounded-xl transition-transform hover:scale-110">
-                {isDarkMode ? <Sun size={18} className="text-yellow-500"/> : <Moon size={18} className="text-blue-600"/>}
-              </button>
+              <div className="flex items-center gap-2">
+                <button onClick={() => setShowPasswordModal(true)} className="lg:hidden p-3 bg-slate-100 dark:bg-slate-800 rounded-xl transition-transform hover:scale-110 text-slate-700 dark:text-slate-300" title="Ubah Sandi">
+                  <Key size={18}/>
+                </button>
+                <button onClick={toggleDarkMode} className="p-3 bg-slate-100 dark:bg-slate-800 rounded-xl transition-transform hover:scale-110">
+                  {isDarkMode ? <Sun size={18} className="text-yellow-500"/> : <Moon size={18} className="text-blue-600"/>}
+                </button>
+                <button onClick={() => setConfirmDialog({
+                    title: "Keluar Aplikasi",
+                    message: "Apakah Anda yakin ingin keluar dari akun ini?",
+                    isDanger: true,
+                    confirmText: "Keluar",
+                    onConfirm: () => { setConfirmDialog(null); onLogout(); }
+                  })} 
+                  className="lg:hidden p-3 bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-500 rounded-xl transition-transform hover:scale-110" title="Keluar">
+                  <LogOut size={18}/>
+                </button>
+              </div>
             </div>
           </header>
 
@@ -480,6 +496,8 @@ function MainDashboard({ currentUser, pegawaiList, allHistory, credentials, show
       {showPasswordModal && <PasswordModal currentUser={currentUser} credentials={credentials} db={db} appId={appId} onClose={() => setShowPasswordModal(false)} showToast={showToast} />}
       
       {showPengumumanModal && <EditPengumumanModal db={db} appId={appId} pengumumanData={pengumumanData} onClose={() => setShowPengumumanModal(false)} showToast={showToast} />}
+
+      {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
 
       {/* Pop-up Kirim WA Otomatis */}
       {showWAAlert && (
@@ -1422,14 +1440,14 @@ function PasswordModal({ currentUser, credentials, db, appId, onClose, showToast
 
   const handleUpdateClick = (e) => {
     e.preventDefault();
-    if (newPass !== confirmPass) return showToast("Konfirmasi sandi tidak cocok", "error");
+    if (newPass !== confirmPass) return showToast("Konfirmasi password tidak cocok", "error");
     const cred = credentials.find(c => c.username === currentUser.rawUsername);
     const exp = cred?.password || (currentUser.rawUsername === '2001' ? 'november' : '123456');
-    if (oldPass !== exp) return showToast("Sandi lama yang dimasukkan salah", "error");
+    if (oldPass !== exp) return showToast("Password lama yang dimasukkan salah", "error");
 
     setConfirmDialog({
       title: "PENGATURAN KEAMANAN",
-      message: "Apakah Anda yakin ingin menyimpan kata sandi baru Anda?",
+      message: "Apakah Anda yakin ingin menyimpan password baru Anda?",
       onConfirm: () => {
         setConfirmDialog(null);
         executeUpdate();
@@ -1442,22 +1460,42 @@ function PasswordModal({ currentUser, credentials, db, appId, onClose, showToast
     try {
       const ref = doc(db, 'artifacts', appId, 'public', 'data', 'credentials', currentUser.rawUsername);
       await setDoc(ref, { username: currentUser.rawUsername, password: newPass, updatedAt: Date.now() });
-      showToast("Kata Sandi Berhasil Diperbarui!"); onClose();
-    } catch (err) { showToast("Gagal memperbarui sandi", "error"); } finally { setLoading(false); }
+      showToast("Password Berhasil Diperbarui!"); onClose();
+    } catch (err) { showToast("Gagal memperbarui password", "error"); } finally { setLoading(false); }
   };
 
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md">
       <div className="glass-card p-10 rounded-[3rem] max-w-sm w-full text-center border border-white/10 shadow-2xl animate-in zoom-in">
         <Key size={40} className="text-blue-500 mx-auto mb-6" />
-        <h2 className="text-2xl font-black mb-8 text-slate-950 dark:text-white">Ubah Kata Sandi</h2>
+        <h2 className="text-2xl font-black mb-8 text-slate-950 dark:text-white">Ubah Password</h2>
         <form onSubmit={handleUpdateClick} className="space-y-4 text-left">
-          <div className="relative">
-            <input type={showPassMap.confirm ? "text" : "password"} value={confirmPass} onChange={(e) => setConfirmPass(e.target.value)} placeholder="Ulangi Sandi Baru" className="w-full pl-5 pr-12 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs outline-none focus:ring-2 focus:ring-blue-500 font-bold dark:text-white shadow-inner text-slate-950" />
-            <button type="button" onClick={() => toggleShow('confirm')} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-500">{showPassMap.confirm ? <EyeOff size={16}/> : <Eye size={16}/>}</button>
+          
+          <div className="space-y-1 relative">
+            <label className="text-[8px] font-black uppercase text-slate-500 ml-2">Password Lama</label>
+            <div className="relative">
+              <input type={showPassMap.old ? "text" : "password"} value={oldPass} onChange={(e) => setOldPass(e.target.value)} placeholder="Masukkan Password Lama" className="w-full pl-5 pr-12 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs outline-none focus:ring-2 focus:ring-blue-500 font-bold dark:text-white shadow-inner text-slate-950" />
+              <button type="button" onClick={() => toggleShow('old')} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-500">{showPassMap.old ? <EyeOff size={16}/> : <Eye size={16}/>}</button>
+            </div>
           </div>
 
-          <button type="submit" disabled={loading} className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] mt-4 btn-3d shadow-xl shadow-blue-600/30">{loading ? 'Memproses...' : 'Simpan Perubahan Sandi'}</button>
+          <div className="space-y-1 relative">
+            <label className="text-[8px] font-black uppercase text-slate-500 ml-2">Password Baru</label>
+            <div className="relative">
+              <input type={showPassMap.new ? "text" : "password"} value={newPass} onChange={(e) => setNewPass(e.target.value)} placeholder="Masukkan Password Baru" className="w-full pl-5 pr-12 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs outline-none focus:ring-2 focus:ring-blue-500 font-bold dark:text-white shadow-inner text-slate-950" />
+              <button type="button" onClick={() => toggleShow('new')} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-500">{showPassMap.new ? <EyeOff size={16}/> : <Eye size={16}/>}</button>
+            </div>
+          </div>
+
+          <div className="space-y-1 relative">
+            <label className="text-[8px] font-black uppercase text-slate-500 ml-2">Konfirmasi Password Baru</label>
+            <div className="relative">
+              <input type={showPassMap.confirm ? "text" : "password"} value={confirmPass} onChange={(e) => setConfirmPass(e.target.value)} placeholder="Ketik Ulang Password Baru" className="w-full pl-5 pr-12 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs outline-none focus:ring-2 focus:ring-blue-500 font-bold dark:text-white shadow-inner text-slate-950" />
+              <button type="button" onClick={() => toggleShow('confirm')} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-500">{showPassMap.confirm ? <EyeOff size={16}/> : <Eye size={16}/>}</button>
+            </div>
+          </div>
+
+          <button type="submit" disabled={loading} className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] mt-4 btn-3d shadow-xl shadow-blue-600/30">{loading ? 'Memproses...' : 'Simpan Perubahan Password'}</button>
           <button type="button" onClick={onClose} className="w-full py-2 text-slate-600 text-[9px] font-black uppercase mt-2">Batal</button>
         </form>
       </div>
