@@ -17,12 +17,13 @@ import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged }
 import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, query, writeBatch, setDoc } from 'firebase/firestore';
 
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
-  apiKey: "", 
-  authDomain: "default-app-id.firebaseapp.com",
-  projectId: "default-app-id",
-  storageBucket: "default-app-id.appspot.com",
-  messagingSenderId: "123456789",
-  appId: "1:123456789:web:abcdef"
+  apiKey: "AIzaSyBeVz1veJfe_9vNw-sZTnEaiBn860pQrFA",
+  authDomain: "aplikasi-absen-2cf3f.firebaseapp.com",
+  projectId: "aplikasi-absen-2cf3f",
+  storageBucket: "aplikasi-absen-2cf3f.firebasestorage.app",
+  messagingSenderId: "783186509092",
+  appId: "1:783186509092:web:9ccb6ed22fdc72c468c7b1",
+  measurementId: "G-S2MYY30NGJ"
 };
 
 const app = initializeApp(firebaseConfig);
