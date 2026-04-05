@@ -568,21 +568,45 @@ function AbsenView({ currentUser, currentTime, allHistory, showToast, appId, db,
     }, 2000);
   };
 
+  const fetchIPLocation = async () => {
+    try {
+      const res = await fetch('https://get.geojs.io/v1/ip/geo.json');
+      const data = await res.json();
+      if (data.latitude && data.longitude) {
+        setLocation({ lat: parseFloat(data.latitude), lng: parseFloat(data.longitude), manual: false, bypass: true });
+        setDist(getDistanceInKm(parseFloat(data.latitude), parseFloat(data.longitude), TARGET_LAT, TARGET_LNG));
+        showToast("Keamanan dilewati: Menampilkan lokasi jaringan riil", "success");
+      } else throw new Error();
+    } catch (err) {
+      showToast("Sinyal GPS diblokir total oleh perangkat", "error");
+    }
+  };
+
   const toggleLocationTracking = () => {
-    if (!navigator.geolocation) return showToast("GPS tidak didukung! Silakan gunakan Lokasi Simulasi.", "error");
     if (isTrackingLocation) {
       if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
       setIsTrackingLocation(false); showToast("Pelacakan GPS dihentikan"); return;
     }
-    showToast("Memulai pelacakan lokasi real-time..."); setIsTrackingLocation(true);
+    showToast("Meminta akses lokasi real-time..."); setIsTrackingLocation(true);
+
+    if (!navigator.geolocation) {
+      fetchIPLocation();
+      return;
+    }
+
     watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
         const { latitude, longitude } = pos.coords;
         setLocation({ lat: latitude, lng: longitude });
         setDist(getDistanceInKm(latitude, longitude, TARGET_LAT, TARGET_LNG));
       },
-      (err) => { showToast("Sinyal GPS Lemah/Ditolak! Silakan gunakan Lokasi Simulasi.", "error"); setIsTrackingLocation(false); if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current); },
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+      (err) => { 
+        // Bypass aturan keamanan browser (jika HTTP atau akses diblokir pengguna)
+        fetchIPLocation();
+        setIsTrackingLocation(false); 
+        if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current); 
+      },
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
     );
   };
 
