@@ -6,7 +6,7 @@ import {
   Loader2, Download, Printer, Edit, Trash2, Plus, UserPlus, 
   FileSpreadsheet, MessageCircle, Moon, Sun, ChevronRight, Activity,
   LayoutDashboard, Database, BarChart3, Settings, Wand2, Eye, EyeOff, MapPinOff,
-  ShieldAlert, HelpCircle, AlertTriangle, MessageSquare, BellRing, Upload
+  ShieldAlert, HelpCircle, AlertTriangle, MessageSquare, BellRing, Upload, Megaphone
 } from 'lucide-react';
 
 // ==========================================
@@ -33,6 +33,7 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'lapas-kalabahi-v2';
 
 const TARGET_LAT = -8.219515;
 const TARGET_LNG = 124.513346;
+const PETA_DARURAT_URL = "https://maps.app.goo.gl/kndHbFguLbkCowxf8"; // Link Maps Darurat
 
 function getDistanceInKm(lat1, lon1, lat2, lon2) {
   if (!lat1 || !lon1) return null;
@@ -85,6 +86,12 @@ export default function App() {
   const [pegawaiList, setPegawaiList] = useState([]);
   const [credentials, setCredentials] = useState([]);
   const [allHistory, setAllHistory] = useState([]);
+  
+  // State Pengumuman (Broadcast)
+  const [pengumumanData, setPengumumanData] = useState({ 
+    id: null, 
+    text: "Selamat Datang di SATU-KALA (Sistem Absensi Terpadu Lapas Kalabahi). Mari tingkatkan terus kedisiplinan dan kinerja kita bersama. Selamat bertugas!" 
+  });
 
   const showToast = (message, type = 'success') => {
     setToast({ message, type });
@@ -166,8 +173,16 @@ export default function App() {
     const unsubCreds = onSnapshot(qCreds, (snap) => setCredentials(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     const qAbsen = collection(db, 'artifacts', appId, 'public', 'data', 'absensi');
     const unsubAbsen = onSnapshot(qAbsen, (snap) => setAllHistory(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => b.timestamp - a.timestamp)));
+    
+    // Subscribe Pengumuman
+    const qPengumuman = collection(db, 'artifacts', appId, 'public', 'data', 'pengumuman');
+    const unsubPengumuman = onSnapshot(qPengumuman, (snap) => {
+      if (!snap.empty) {
+        setPengumumanData({ id: snap.docs[0].id, text: snap.docs[0].data().text });
+      }
+    });
 
-    return () => { unsubPegawai(); unsubCreds(); unsubAbsen(); };
+    return () => { unsubPegawai(); unsubCreds(); unsubAbsen(); unsubPengumuman(); };
   }, [firebaseUser]);
 
   if (!isAuthReady) {
@@ -185,6 +200,8 @@ export default function App() {
         .btn-3d:active { transform: translateY(2px); box-shadow: 0 1px 0 rgba(30, 64, 175, 0.5); }
         .laser-line { width: 100%; height: 2px; background: #3b82f6; box-shadow: 0 0 15px #3b82f6; position: absolute; animation: scan 2s infinite linear; z-index: 10; }
         @keyframes scan { 0% { top: 0%; opacity: 0; } 50% { opacity: 1; } 100% { top: 100%; opacity: 0; } }
+        @keyframes marquee { 0% { transform: translateX(100%); } 100% { transform: translateX(-150%); } }
+        .animate-marquee { display: inline-block; animation: marquee 25s linear infinite; white-space: nowrap; }
       `}</style>
 
       {toast && (
@@ -233,6 +250,7 @@ export default function App() {
           currentTime={currentTime}
           isTimeSynced={isTimeSynced}
           timeAnomaly={timeAnomaly}
+          pengumumanData={pengumumanData}
         />
       )}
     </div>
@@ -322,9 +340,10 @@ function LoginPage({ onLogin, credentials, pegawaiList, isDarkMode, toggleDarkMo
 // ==========================================
 // DASHBOARD UTAMA
 // ==========================================
-function MainDashboard({ currentUser, pegawaiList, allHistory, credentials, showToast, isDarkMode, toggleDarkMode, onLogout, appId, db, currentTime, isTimeSynced, timeAnomaly }) {
+function MainDashboard({ currentUser, pegawaiList, allHistory, credentials, showToast, isDarkMode, toggleDarkMode, onLogout, appId, db, currentTime, isTimeSynced, timeAnomaly, pengumumanData }) {
   const [activeTab, setActiveTab] = useState(currentUser.role === 'admin' ? 'rekap' : 'absen');
   const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [showPengumumanModal, setShowPengumumanModal] = useState(false);
   
   // State untuk Fitur Auto WA
   const [waConfig, setWaConfig] = useState(() => {
@@ -391,7 +410,7 @@ function MainDashboard({ currentUser, pegawaiList, allHistory, credentials, show
 
       <main className="flex-1 lg:ml-72 pb-24 lg:pb-10 relative">
         <div className="p-6 md:p-10 max-w-6xl mx-auto">
-          <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-12">
+          <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-8">
             <div>
               <h1 className="text-4xl font-black tracking-tighter text-slate-950 dark:text-white">
                 {activeTab === 'absen' ? 'Pusat Presensi' : (menuItems.find(m => m.id === activeTab)?.label || activeTab)}
@@ -419,6 +438,23 @@ function MainDashboard({ currentUser, pegawaiList, allHistory, credentials, show
             </div>
           </header>
 
+          {/* BANNER PENGUMUMAN INTERNAL */}
+          <div className="mb-8 glass-card p-4 rounded-2xl flex items-center justify-between border-l-4 border-blue-500 shadow-md bg-blue-50/50 dark:bg-blue-900/10">
+            <div className="flex items-center gap-4 overflow-hidden w-full">
+              <Megaphone className="text-blue-600 shrink-0" size={20} />
+              <div className="overflow-hidden w-full">
+                <div className="animate-marquee text-[11px] md:text-xs font-bold uppercase tracking-widest text-slate-700 dark:text-slate-300">
+                  {pengumumanData.text}
+                </div>
+              </div>
+            </div>
+            {currentUser.role === 'admin' && (
+              <button onClick={() => setShowPengumumanModal(true)} className="ml-4 p-3 bg-white dark:bg-slate-800 rounded-xl text-blue-600 shadow-sm hover:scale-110 transition-transform shrink-0" title="Edit Pengumuman">
+                <Edit size={16}/>
+              </button>
+            )}
+          </div>
+
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
             {activeTab === 'absen' && <AbsenView currentUser={currentUser} currentTime={currentTime} allHistory={allHistory} showToast={showToast} appId={appId} db={db} isSynced={isTimeSynced && !timeAnomaly} />}
             {activeTab === 'riwayat' && <HistoryList history={currentUser.role === 'admin' ? allHistory : allHistory.filter(h => h.username === currentUser.rawUsername)} currentUser={currentUser} db={db} appId={appId} showToast={showToast} />}
@@ -440,8 +476,11 @@ function MainDashboard({ currentUser, pegawaiList, allHistory, credentials, show
         ))}
       </nav>
 
+      {/* MODALS */}
       {showPasswordModal && <PasswordModal currentUser={currentUser} credentials={credentials} db={db} appId={appId} onClose={() => setShowPasswordModal(false)} showToast={showToast} />}
       
+      {showPengumumanModal && <EditPengumumanModal db={db} appId={appId} pengumumanData={pengumumanData} onClose={() => setShowPengumumanModal(false)} showToast={showToast} />}
+
       {/* Pop-up Kirim WA Otomatis */}
       {showWAAlert && (
         <AutoWAAlert 
@@ -462,7 +501,59 @@ function MainDashboard({ currentUser, pegawaiList, allHistory, credentials, show
 }
 
 // ==========================================
-// VIEW: PRESENSI (ABSEN) + LIVE GPS MAP
+// MODAL: EDIT PENGUMUMAN OLEH ADMIN
+// ==========================================
+function EditPengumumanModal({ db, appId, pengumumanData, onClose, showToast }) {
+  const [text, setText] = useState(pengumumanData.text);
+  const [loading, setLoading] = useState(false);
+
+  const handleSave = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      if (pengumumanData.id) {
+        await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pengumuman', pengumumanData.id), { text });
+      } else {
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pengumuman'), { text });
+      }
+      showToast("Pengumuman berhasil diperbarui!");
+      onClose();
+    } catch (err) {
+      showToast("Gagal menyimpan pengumuman", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md">
+      <div className="glass-card p-10 rounded-[3rem] max-w-md w-full border border-white/10 shadow-2xl animate-in zoom-in">
+        <Megaphone size={40} className="text-blue-500 mx-auto mb-4" />
+        <h2 className="text-xl font-black mb-1 text-center text-slate-950 dark:text-white">Edit Pengumuman</h2>
+        <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-6 text-center leading-relaxed">Broadcast Internal Pegawai</p>
+        
+        <form onSubmit={handleSave} className="space-y-4 text-left">
+          <div className="space-y-1">
+            <textarea 
+              value={text} 
+              onChange={(e) => setText(e.target.value)} 
+              rows={4}
+              className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs outline-none focus:ring-2 focus:ring-blue-500 font-bold dark:text-white shadow-inner text-slate-950 resize-none" 
+              placeholder="Tulis pengumuman di sini..."
+            />
+          </div>
+          <button type="submit" disabled={loading} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] mt-4 shadow-xl shadow-blue-600/30 hover:scale-[1.02] transition-transform btn-3d">
+            {loading ? 'Menyimpan...' : 'Sebarkan Pengumuman'}
+          </button>
+          <button type="button" onClick={onClose} className="w-full py-2 text-slate-600 text-[9px] font-black uppercase mt-2">Batal</button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// VIEW: PRESENSI (ABSEN) + LIVE GPS MAP + FALLBACK PETA DARURAT
 // ==========================================
 function AbsenView({ currentUser, currentTime, allHistory, showToast, appId, db, isSynced }) {
   const [photo, setPhoto] = useState(null);
@@ -473,6 +564,7 @@ function AbsenView({ currentUser, currentTime, allHistory, showToast, appId, db,
   const [loading, setLoading] = useState(false);
   const [isCameraActive, setIsCameraActive] = useState(false); 
   const [isTrackingLocation, setIsTrackingLocation] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState(null);
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
@@ -534,7 +626,10 @@ function AbsenView({ currentUser, currentTime, allHistory, showToast, appId, db,
   };
 
   const toggleLocationTracking = () => {
-    if (!navigator.geolocation) return showToast("GPS tidak didukung oleh perangkat", "error");
+    if (!navigator.geolocation) {
+      showToast("GPS tidak didukung! Silakan gunakan Lokasi Simulasi.", "error");
+      return;
+    }
 
     if (isTrackingLocation) {
       if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
@@ -552,7 +647,8 @@ function AbsenView({ currentUser, currentTime, allHistory, showToast, appId, db,
         setDist(getDistanceInKm(latitude, longitude, TARGET_LAT, TARGET_LNG));
       },
       (err) => {
-        showToast("Sinyal GPS Lemah, pastikan pengaturan lokasi aktif", "error");
+        // FALLBACK: Jika ditolak/gagal
+        showToast("Sinyal GPS Lemah/Ditolak! Silakan gunakan Lokasi Simulasi.", "error");
         setIsTrackingLocation(false);
         if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
       },
@@ -560,14 +656,27 @@ function AbsenView({ currentUser, currentTime, allHistory, showToast, appId, db,
     );
   };
 
-  const submitAbsen = async () => {
+  const submitAbsenClick = () => {
     if (!auth.currentUser) return showToast("Sesi habis, harap login ulang", "error");
     if (!isSynced) return showToast("Waktu perangkat tidak valid", "error");
 
-    if (!window.confirm(`KONFIRMASI ABSENSI:\n\nApakah Anda yakin ingin mengirim laporan [${absenType}] sekarang?\n\nPastikan foto wajah dan titik lokasi Anda sudah akurat.`)) {
-      return;
+    if (!location) {
+      setConfirmDialog({
+        title: "PERINGATAN GPS",
+        message: "Sinyal GPS Anda belum terkunci atau menggunakan simulasi.\nAnda akan melakukan absensi TANPA verifikasi titik koordinat asli.\n\nTetap Lanjutkan?",
+        isDanger: true,
+        onConfirm: () => { setConfirmDialog(null); executeSubmit(); }
+      });
+    } else {
+      setConfirmDialog({
+        title: "KONFIRMASI ABSENSI",
+        message: `Apakah Anda yakin ingin mengirim laporan [${absenType}] sekarang?\n\nPastikan foto wajah dan titik lokasi Anda sudah akurat.`,
+        onConfirm: () => { setConfirmDialog(null); executeSubmit(); }
+      });
     }
+  };
 
+  const executeSubmit = async () => {
     if (absenType === 'Sakit') {
       const currentMonth = currentTime.getMonth();
       const currentYear = currentTime.getFullYear();
@@ -681,17 +790,30 @@ function AbsenView({ currentUser, currentTime, allHistory, showToast, appId, db,
           >
             {isTrackingLocation ? 'Hentikan Lacak GPS' : 'Mulai Lacak GPS Real-Time (Peta)'}
           </button>
+          
+          {/* TOMBOL PETA DARURAT (MANUAL / SIMULASI) */}
+          <button 
+            onClick={() => {
+              setLocation({ lat: TARGET_LAT, lng: TARGET_LNG, manual: true });
+              setDist(0);
+              showToast("Lokasi simulasi diaktifkan!", "success");
+            }}
+            className="w-full mt-3 py-3 glass-card rounded-2xl font-black text-[9px] uppercase transition-all shadow-sm bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400 border border-amber-200 dark:border-amber-800"
+          >
+            Lokasi GPS Gagal? Gunakan Lokasi Simulasi
+          </button>
         </div>
 
         <div className="glass-card p-6 md:p-8 rounded-[2.5rem] flex flex-col md:flex-row gap-4 items-center border border-blue-500/10 shadow-lg">
           <select value={absenType} onChange={e => setAbsenType(e.target.value)} className="w-full md:flex-1 p-4 bg-slate-100 dark:bg-slate-900 border-none rounded-2xl font-black text-xs text-center outline-none cursor-pointer text-slate-950 dark:text-white shadow-inner">
             {['Masuk', 'Keluar', 'Lepas Piket', 'Sakit', 'Cuti', 'Dinas Luar'].map(t => <option key={t} value={t}>{t}</option>)}
           </select>
-          <button disabled={!photo || loading || !isSynced || !location} onClick={submitAbsen} className="w-full md:w-auto px-10 py-5 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] btn-3d shadow-xl shadow-blue-600/30 disabled:opacity-30 disabled:scale-100 transition-all active:scale-95">
+          <button disabled={!photo || loading || !isSynced} onClick={submitAbsenClick} className="w-full md:w-auto px-10 py-5 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] btn-3d shadow-xl shadow-blue-600/30 disabled:opacity-30 disabled:scale-100 transition-all active:scale-95">
             {loading ? <Loader2 className="animate-spin mx-auto" size={18}/> : `Lapor ${absenType}`}
           </button>
         </div>
       </div>
+      {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
     </div>
   );
 }
@@ -963,6 +1085,7 @@ function KelolaView({ pegawaiList, showToast, db, appId, credentials }) {
   const [previewData, setPreviewData] = useState(null);
   const [targetPassUser, setTargetPassUser] = useState(null); 
   const [showAddModal, setShowAddModal] = useState(false); // Modal Tambah Manual
+  const [confirmDialog, setConfirmDialog] = useState(null);
   const fileInputRef = useRef(null);
 
   const dataAwal = [
@@ -1124,7 +1247,16 @@ function KelolaView({ pegawaiList, showToast, db, appId, credentials }) {
             <div className="text-left"><p className="font-black text-sm text-slate-950 dark:text-white leading-none">{p.nama}</p><p className="text-[9px] font-bold text-slate-600 dark:text-slate-400 mt-2 uppercase">{p.nip} | <span className="text-blue-600">{p.bidang}</span></p></div>
             <div className="flex gap-2 shrink-0">
               <button onClick={() => setTargetPassUser(p)} className="p-3 bg-amber-50 dark:bg-amber-900/20 text-amber-600 rounded-xl" title="Lihat/Ubah Sandi"><Key size={14}/></button>
-              <button onClick={async () => { if(window.confirm(`Hapus ${p.nama}?`)) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pegawai', p.id)); }} className="p-3 bg-rose-50 dark:bg-rose-900/20 text-rose-600 rounded-xl"><Trash2 size={14}/></button>
+              <button onClick={() => setConfirmDialog({
+                title: "Hapus Personel",
+                message: `Anda yakin ingin menghapus data pegawai ${p.nama}?`,
+                isDanger: true,
+                onConfirm: async () => {
+                  setConfirmDialog(null);
+                  await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pegawai', p.id));
+                  showToast("Pegawai berhasil dihapus");
+                }
+              })} className="p-3 bg-rose-50 dark:bg-rose-900/20 text-rose-600 rounded-xl"><Trash2 size={14}/></button>
             </div>
           </div>
         ))}
@@ -1155,6 +1287,8 @@ function KelolaView({ pegawaiList, showToast, db, appId, credentials }) {
       {targetPassUser && (
         <AdminEditPasswordModal targetUser={targetPassUser} credentials={credentials} db={db} appId={appId} onClose={() => setTargetPassUser(null)} showToast={showToast} />
       )}
+
+      {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
     </div>
   );
 }
@@ -1224,15 +1358,24 @@ function AdminEditPasswordModal({ targetUser, credentials, db, appId, onClose, s
   const [newPass, setNewPass] = useState(currentPass);
   const [showPass, setShowPass] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState(null);
 
-  const handleUpdate = async (e) => {
+  const handleUpdateClick = (e) => {
     e.preventDefault();
     if (!newPass) return showToast("Sandi tidak boleh kosong", "error");
 
-    if (!window.confirm(`KONFIRMASI ADMIN:\n\nAnda yakin ingin mengubah kata sandi untuk akun milik:\n${targetUser.nama}?`)) {
-      return;
-    }
+    setConfirmDialog({
+      title: "KONFIRMASI ADMIN",
+      message: `Anda yakin ingin mengubah kata sandi untuk akun milik:\n${targetUser.nama}?`,
+      isDanger: true,
+      onConfirm: () => {
+        setConfirmDialog(null);
+        executeUpdate();
+      }
+    });
+  };
 
+  const executeUpdate = async () => {
     setLoading(true);
     try {
       const ref = doc(db, 'artifacts', appId, 'public', 'data', 'credentials', targetUser.nip);
@@ -1250,7 +1393,7 @@ function AdminEditPasswordModal({ targetUser, credentials, db, appId, onClose, s
         <h2 className="text-xl font-black mb-1 text-slate-950 dark:text-white">Akses Admin</h2>
         <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-8 leading-relaxed">Kelola Sandi: {targetUser.nama}</p>
         
-        <form onSubmit={handleUpdate} className="space-y-4 text-left">
+        <form onSubmit={handleUpdateClick} className="space-y-4 text-left">
           <div className="relative">
             <input type={showPass ? "text" : "password"} value={newPass} onChange={(e) => setNewPass(e.target.value)} className="w-full pl-5 pr-12 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs outline-none focus:ring-2 focus:ring-amber-500 font-bold dark:text-white shadow-inner text-slate-950" />
             <button type="button" onClick={() => setShowPass(!showPass)} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-amber-500">{showPass ? <EyeOff size={16}/> : <Eye size={16}/>}</button>
@@ -1259,6 +1402,7 @@ function AdminEditPasswordModal({ targetUser, credentials, db, appId, onClose, s
           <button type="button" onClick={onClose} className="w-full py-2 text-slate-600 text-[9px] font-black uppercase mt-2">Batal</button>
         </form>
       </div>
+      {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
     </div>
   );
 }
@@ -1272,20 +1416,28 @@ function PasswordModal({ currentUser, credentials, db, appId, onClose, showToast
   const [confirmPass, setConfirmPass] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassMap, setShowPassMap] = useState({ old: false, new: false, confirm: false }); 
+  const [confirmDialog, setConfirmDialog] = useState(null);
 
   const toggleShow = (field) => setShowPassMap(prev => ({ ...prev, [field]: !prev[field] }));
 
-  const handleUpdate = async (e) => {
+  const handleUpdateClick = (e) => {
     e.preventDefault();
     if (newPass !== confirmPass) return showToast("Konfirmasi sandi tidak cocok", "error");
     const cred = credentials.find(c => c.username === currentUser.rawUsername);
     const exp = cred?.password || (currentUser.rawUsername === '2001' ? 'november' : '123456');
     if (oldPass !== exp) return showToast("Sandi lama yang dimasukkan salah", "error");
 
-    if (!window.confirm("PENGATURAN KEAMANAN:\n\nApakah Anda yakin ingin menyimpan kata sandi baru Anda?")) {
-      return;
-    }
+    setConfirmDialog({
+      title: "PENGATURAN KEAMANAN",
+      message: "Apakah Anda yakin ingin menyimpan kata sandi baru Anda?",
+      onConfirm: () => {
+        setConfirmDialog(null);
+        executeUpdate();
+      }
+    });
+  };
 
+  const executeUpdate = async () => {
     setLoading(true);
     try {
       const ref = doc(db, 'artifacts', appId, 'public', 'data', 'credentials', currentUser.rawUsername);
@@ -1299,18 +1451,7 @@ function PasswordModal({ currentUser, credentials, db, appId, onClose, showToast
       <div className="glass-card p-10 rounded-[3rem] max-w-sm w-full text-center border border-white/10 shadow-2xl animate-in zoom-in">
         <Key size={40} className="text-blue-500 mx-auto mb-6" />
         <h2 className="text-2xl font-black mb-8 text-slate-950 dark:text-white">Ubah Kata Sandi</h2>
-        <form onSubmit={handleUpdate} className="space-y-4 text-left">
-          
-          <div className="relative">
-            <input type={showPassMap.old ? "text" : "password"} value={oldPass} onChange={(e) => setOldPass(e.target.value)} placeholder="Sandi Lama" className="w-full pl-5 pr-12 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs outline-none focus:ring-2 focus:ring-blue-500 font-bold dark:text-white shadow-inner text-slate-950" />
-            <button type="button" onClick={() => toggleShow('old')} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-500">{showPassMap.old ? <EyeOff size={16}/> : <Eye size={16}/>}</button>
-          </div>
-
-          <div className="relative">
-            <input type={showPassMap.new ? "text" : "password"} value={newPass} onChange={(e) => setNewPass(e.target.value)} placeholder="Sandi Baru" className="w-full pl-5 pr-12 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs outline-none focus:ring-2 focus:ring-blue-500 font-bold dark:text-white shadow-inner text-slate-950" />
-            <button type="button" onClick={() => toggleShow('new')} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-500">{showPassMap.new ? <EyeOff size={16}/> : <Eye size={16}/>}</button>
-          </div>
-
+        <form onSubmit={handleUpdateClick} className="space-y-4 text-left">
           <div className="relative">
             <input type={showPassMap.confirm ? "text" : "password"} value={confirmPass} onChange={(e) => setConfirmPass(e.target.value)} placeholder="Ulangi Sandi Baru" className="w-full pl-5 pr-12 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs outline-none focus:ring-2 focus:ring-blue-500 font-bold dark:text-white shadow-inner text-slate-950" />
             <button type="button" onClick={() => toggleShow('confirm')} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-500">{showPassMap.confirm ? <EyeOff size={16}/> : <Eye size={16}/>}</button>
@@ -1320,6 +1461,7 @@ function PasswordModal({ currentUser, credentials, db, appId, onClose, showToast
           <button type="button" onClick={onClose} className="w-full py-2 text-slate-600 text-[9px] font-black uppercase mt-2">Batal</button>
         </form>
       </div>
+      {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
     </div>
   );
 }
@@ -1329,16 +1471,23 @@ function PasswordModal({ currentUser, credentials, db, appId, onClose, showToast
 // ==========================================
 function HistoryList({ history, currentUser, db, appId, showToast }) {
   const [editingLog, setEditingLog] = useState(null);
+  const [confirmDialog, setConfirmDialog] = useState(null);
 
-  const handleDelete = async (id) => {
-    if (window.confirm("Peringatan Admin: Yakin ingin MENGHAPUS log absensi ini?")) {
-      try {
-        await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'absensi', id));
-        showToast("Log absensi berhasil dihapus!", "success");
-      } catch (err) {
-        showToast("Gagal menghapus log", "error");
+  const handleDeleteClick = (id) => {
+    setConfirmDialog({
+      title: "Hapus Log Absensi",
+      message: "Peringatan Admin: Yakin ingin MENGHAPUS log absensi ini?",
+      isDanger: true,
+      onConfirm: async () => {
+        setConfirmDialog(null);
+        try {
+          await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'absensi', id));
+          showToast("Log absensi berhasil dihapus!", "success");
+        } catch (err) {
+          showToast("Gagal menghapus log", "error");
+        }
       }
-    }
+    });
   };
 
   if (history.length === 0) return <div className="p-20 text-center opacity-30"><History size={60} className="mx-auto mb-6 text-slate-400" /><p className="text-[9px] font-black uppercase tracking-widest leading-loose text-slate-600">Log harian kosong</p></div>;
@@ -1371,7 +1520,7 @@ function HistoryList({ history, currentUser, db, appId, showToast }) {
             {currentUser.role === 'admin' && (
               <div className="flex gap-2 mr-2">
                 <button onClick={() => setEditingLog(item)} className="p-2 bg-blue-50 dark:bg-blue-900/20 text-blue-600 rounded-lg" title="Edit Absensi"><Edit size={14}/></button>
-                <button onClick={() => handleDelete(item.id)} className="p-2 bg-rose-50 dark:bg-rose-900/20 text-rose-600 rounded-lg" title="Hapus Absensi"><Trash2 size={14}/></button>
+                <button onClick={() => handleDeleteClick(item.id)} className="p-2 bg-rose-50 dark:bg-rose-900/20 text-rose-600 rounded-lg" title="Hapus Absensi"><Trash2 size={14}/></button>
               </div>
             )}
             {item.photoStr ? <img src={item.photoStr} className="w-12 h-12 rounded-xl object-cover border border-slate-200 dark:border-slate-800 shadow-md" alt="Log" /> : <div className="w-12 h-12 rounded-xl bg-slate-200 dark:bg-slate-800 opacity-50 flex items-center justify-center"><User size={16} className="text-slate-400"/></div>}
@@ -1388,6 +1537,8 @@ function HistoryList({ history, currentUser, db, appId, showToast }) {
           showToast={showToast} 
         />
       )}
+      
+      {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
     </div>
   );
 }
@@ -1439,6 +1590,29 @@ function AdminEditHistoryModal({ log, db, appId, onClose, showToast }) {
           <button type="submit" disabled={loading} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] mt-4 shadow-xl shadow-blue-600/30 hover:scale-[1.02] transition-transform">{loading ? 'Menyimpan...' : 'Simpan Perubahan'}</button>
           <button type="button" onClick={onClose} className="w-full py-2 text-slate-600 text-[9px] font-black uppercase mt-2">Batal</button>
         </form>
+      </div>
+    </div>
+  );
+}
+
+// ==========================================
+// MODAL: KONFIRMASI UMUM (CUSTOM)
+// ==========================================
+function ConfirmModal({ title, message, onConfirm, onCancel, confirmText = "Ya, Lanjutkan", cancelText = "Batal", isDanger = false }) {
+  return (
+    <div className="fixed inset-0 z-[600] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md animate-in fade-in">
+      <div className="glass-card p-8 rounded-[2rem] max-w-sm w-full text-center border border-white/10 shadow-2xl animate-in zoom-in">
+        {isDanger ? <AlertTriangle size={40} className="text-rose-500 mx-auto mb-4" /> : <HelpCircle size={40} className="text-blue-500 mx-auto mb-4" />}
+        <h2 className="text-xl font-black mb-2 text-slate-950 dark:text-white">{title}</h2>
+        <p className="text-[10px] font-bold text-slate-500 mb-6 leading-relaxed whitespace-pre-wrap">{message}</p>
+        <div className="flex gap-3">
+          <button onClick={onCancel} className="flex-1 py-3 text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 rounded-xl font-black uppercase text-[9px] hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors">
+            {cancelText}
+          </button>
+          <button onClick={onConfirm} className={`flex-1 py-3 text-white rounded-xl font-black uppercase text-[9px] btn-3d ${isDanger ? 'bg-rose-600 shadow-rose-600/30' : 'bg-blue-600 shadow-blue-600/30'}`}>
+            {confirmText}
+          </button>
+        </div>
       </div>
     </div>
   );
