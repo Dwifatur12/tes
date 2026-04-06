@@ -34,7 +34,6 @@ const appId = typeof __app_id !== 'undefined' ? __app_id : 'lapas-kalabahi-v2';
 
 const TARGET_LAT = -8.219515;
 const TARGET_LNG = 124.513346;
-const PETA_DARURAT_URL = "https://maps.app.goo.gl/kndHbFguLbkCowxf8";
 
 function getDistanceInKm(lat1, lon1, lat2, lon2) {
   if (!lat1 || !lon1) return null;
@@ -48,26 +47,103 @@ function getDistanceInKm(lat1, lon1, lat2, lon2) {
 
 const formatWITA = (date) => {
   return new Intl.DateTimeFormat('id-ID', {
-    timeZone: 'Asia/Makassar',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false
+    timeZone: 'Asia/Makassar', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false
   }).format(date);
 };
 
 const formatDateIndo = (date) => {
   return new Intl.DateTimeFormat('id-ID', {
-    timeZone: 'Asia/Makassar',
-    weekday: 'long',
-    day: 'numeric',
-    month: 'long',
-    year: 'numeric'
+    timeZone: 'Asia/Makassar', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
   }).format(date);
 };
 
 const getMinutesDiff = (limitH, limitM, actualH, actualM) => {
   return (actualH * 60 + actualM) - (limitH * 60 + limitM);
+};
+
+// ==========================================
+// FORMAT GENERATOR WA APEL PAGI
+// ==========================================
+const generateWAPesan = (pegawaiList, allHistory, dateObj) => {
+  const tStr = formatDateIndo(dateObj);
+  const tLogs = allHistory.filter(h => h.dateStr === tStr);
+
+  let hadirStafCount = 0;
+  let hadirCpnsCount = 0;
+  let totalStafCount = 0;
+  let totalCpnsCount = 0;
+
+  let bko = [];
+  let terlambat = [];
+  let lepasPiket = [];
+  let cutiTahunan = [];
+  let dinasLuar = [];
+  let sakit = [];
+  let tanpaKet = [];
+
+  pegawaiList.forEach(p => {
+    // Memisahkan CPNS berdasarkan nama yang ditentukan
+    const isCpns = p.nama.toUpperCase().includes('DINA TIMUTANG') || p.nama.toUpperCase().includes('MARIA HERLINA SASI');
+    if (isCpns) totalCpnsCount++; else totalStafCount++;
+
+    const userLogs = tLogs.filter(l => l.username === p.nip);
+
+    if (userLogs.length === 0) {
+      tanpaKet.push(p.nama);
+    } else {
+      const special = userLogs.find(l => ['Sakit', 'Cuti', 'Dinas Luar', 'Lepas Piket', 'BKO'].includes(l.type));
+      if (special) {
+        if (special.type === 'Sakit') sakit.push(p.nama);
+        else if (special.type === 'Cuti') cutiTahunan.push(p.nama);
+        else if (special.type === 'Dinas Luar') dinasLuar.push(p.nama);
+        else if (special.type === 'Lepas Piket') lepasPiket.push(p.nama);
+        else if (special.type === 'BKO') bko.push(p.nama);
+      } else {
+        const inLog = userLogs.find(l => l.type === 'Masuk');
+        if (inLog) {
+          // Menghitung kehadiran berdasarkan status pegawai
+          if (isCpns) hadirCpnsCount++; else hadirStafCount++;
+          
+          const [h, m] = inLog.timeStr.split(':').map(Number);
+          if (h > 7 || (h === 7 && m > 30)) {
+            terlambat.push(p.nama);
+          }
+        } else {
+          tanpaKet.push(p.nama);
+        }
+      }
+    }
+  });
+
+  const tidakHadirStaf = totalStafCount - hadirStafCount;
+  const tidakHadirCpns = totalCpnsCount - hadirCpnsCount;
+
+  const formatList = (arr) => arr.length > 0 ? arr.map((name, i) => `${i+1}. ${name}`).join('\n') : '-';
+
+  let msg = `Selamat Pagi, Ijin melaporkan Bapak\nApel Pagi Pegawai Staf Lapas Kelas IIB Kalabahi\n${tStr}\n\n`;
+  msg += `*Jumlah Pegawai Staf* : ${totalStafCount} Orang\n`;
+  msg += `* Hadir : ${hadirStafCount} Orang\n`;
+  msg += `* Tidak Hadir : ${tidakHadirStaf === 0 ? '-' : tidakHadirStaf + ' Orang'}\n`;
+  msg += `*Jumlah CPNS* : ${totalCpnsCount} Orang\n`;
+  msg += `* Hadir : ${hadirCpnsCount} Orang\n`;
+  msg += `* Tidak Hadir : ${tidakHadirCpns === 0 ? '-' : tidakHadirCpns + ' Orang'}\n`;
+  msg += `*Jumlah Peserta Magang* : 18 Orang\n* Hadir : 18 Orang\n* Tidak Hadir : -\n\n`;
+  msg += `*KETERANGAN :*\n\n`;
+  msg += `*BKO :*\n${formatList(bko)}\n\n`;
+  msg += `*TERLAMBAT :*\n${formatList(terlambat)}\n\n`;
+  msg += `*LEPAS PIKET :*\n${formatList(lepasPiket)}\n\n`;
+  msg += `*CUTI MELAHIRKAN :*\n-\n\n`;
+  msg += `*CUTI TAHUNAN :*\n${formatList(cutiTahunan)}\n\n`;
+  msg += `*DINAS LUAR :*\n${formatList(dinasLuar)}\n\n`;
+  msg += `*LIBUR BKO :*\n-\n\n`;
+  msg += `*SAKIT :*\n${formatList(sakit)}\n\n`;
+  msg += `*IJIN :*\n-\n\n`;
+  msg += `*TANPA KETERANGAN :*\n${formatList(tanpaKet)}\n\n`;
+  msg += `*AMANAT*\n* Apel Pagi berjalan aman dan lancar.\n\n`;
+  msg += `Mengetahui,\nKepala Lapas Kelas IIB Kalabahi\nTTD\nM Arfandy,A.Md.IP.,S.H.,M.H\nNIP. 198007232000121001\n\n`;
+  msg += `Demikian Laporan Apel Pagi\nTerima Kasih.`;
+
+  return msg;
 };
 
 // ==========================================
@@ -192,6 +268,9 @@ export default function App() {
         @keyframes scan { 0% { top: 0%; opacity: 0; } 50% { opacity: 1; } 100% { top: 100%; opacity: 0; } }
         @keyframes marquee { 0% { transform: translateX(100%); } 100% { transform: translateX(-150%); } }
         .animate-marquee { display: inline-block; animation: marquee 25s linear infinite; white-space: nowrap; }
+        /* Ikon kalender putih saat dark mode */
+        input[type="date"]::-webkit-calendar-picker-indicator { cursor: pointer; }
+        .dark input[type="date"]::-webkit-calendar-picker-indicator { filter: invert(1); }
       `}</style>
 
       {toast && (
@@ -256,23 +335,13 @@ function LoginPage({ onLogin, credentials, pegawaiList, isDarkMode, toggleDarkMo
 
   return (
     <div className="min-h-screen flex items-center justify-center p-6 relative overflow-hidden">
-      
-      {/* ========================================== */}
-      {/* LAYER BACKGROUND FOTO LAPAS KALABAHI */}
-      {/* ========================================== */}
+      {/* Background Foto (Tanpa Blur) */}
       <div 
         className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat transition-transform duration-[20000ms] hover:scale-105"
-        style={{ 
-          // CATATAN PENTING: 
-          // Saat Anda memasang kode ini di server Anda sendiri, hapus link Unsplash ini
-          // dan ganti dengan path file Anda, contohnya menjadi: 
-          // backgroundImage: `url('./WhatsApp Image 2025-08-05 at 07.51.55_d078491d.jpg')`
-          backgroundImage: `url('./WhatsApp Image 2025-08-05 at 07.51.55_d078491d.jpg')` 
-        }}
+        style={{ backgroundImage: `url('https://images.unsplash.com/photo-1497366216548-37526070297c?q=80&w=2069&auto=format&fit=crop')` }}
       />
-      {/* Overlay Gelap untuk memastikan form login tetap terbaca jelas di atas foto */}
+      {/* Overlay Gelap (Opacity direndahkan, tanpa backdrop-blur agar foto tajam) */}
       <div className="absolute inset-0 z-0 bg-slate-900/40 dark:bg-slate-950/60"></div>
-      {/* ========================================== */}
 
       <button onClick={toggleDarkMode} className="absolute top-8 right-8 p-4 glass-card rounded-2xl transition-transform hover:scale-110 z-10 border border-white/20">
         {isDarkMode ? <Sun className="text-yellow-400" size={20}/> : <Moon className="text-white drop-shadow-md" size={20}/>}
@@ -496,7 +565,7 @@ function MainDashboard({ currentUser, pegawaiList, allHistory, credentials, pass
       {showPengumumanModal && <EditPengumumanModal db={db} appId={appId} pengumumanData={pengumumanData} onClose={() => setShowPengumumanModal(false)} showToast={showToast} />}
       {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
       {showWAAlert && currentUser.role === 'admin' && (
-        <AutoWAAlert onClose={() => setShowWAAlert(false)} onSend={() => { const d = formatDateIndo(currentTime); localStorage.setItem('lastWADate', d); setLastWADate(d); setShowWAAlert(false); }} waConfig={waConfig} allHistory={allHistory} pegawaiList={pegawaiList} />
+        <AutoWAAlert onClose={() => setShowWAAlert(false)} onSend={() => { const d = formatDateIndo(currentTime); localStorage.setItem('lastWADate', d); setLastWADate(d); setShowWAAlert(false); }} waConfig={waConfig} allHistory={allHistory} pegawaiList={pegawaiList} currentTime={currentTime} />
       )}
     </div>
   );
@@ -675,7 +744,7 @@ function AbsenView({ currentUser, currentTime, allHistory, showToast, appId, db,
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
       <canvas ref={canvasRef} className="hidden" />
-      <div className="glass-card p-6 md:p-10 rounded-[3rem] relative overflow-hidden shadow-2xl">
+        <div className="glass-card p-6 md:p-10 rounded-[3rem] relative overflow-hidden shadow-2xl">
         <h3 className="text-[10px] font-black uppercase text-slate-700 dark:text-slate-500 mb-6 flex items-center gap-2"><Camera size={14} className="text-blue-600"/> Verifikasi Biometrik Wajah</h3>
         <div className="aspect-[3/4] md:aspect-video bg-slate-900 rounded-[2rem] overflow-hidden relative border-4 border-slate-200 dark:border-slate-800 shadow-inner">
           {!photo ? (
@@ -699,7 +768,7 @@ function AbsenView({ currentUser, currentTime, allHistory, showToast, appId, db,
       <div className="space-y-6">
         <div className="glass-card p-6 md:p-8 rounded-[2.5rem] shadow-xl">
           <h3 className="text-[10px] font-black uppercase text-slate-700 dark:text-slate-500 mb-6 flex items-center gap-2">
-            <MapPin size={14} className={isTrackingLocation ? "text-emerald-500 animate-pulse" : "text-blue-600"}/> Koordinat Personel GPS {isTrackingLocation && "(LIVE)"}
+            <MapPin size={14} className={isTrackingLocation ? "text-emerald-500 animate-pulse" : "text-blue-600"}/> Koordinat Pegawai GPS {isTrackingLocation && "(LIVE)"}
           </h3>
           <div className="aspect-video bg-slate-900 rounded-[2rem] flex flex-col items-center justify-center border-4 border-slate-200 dark:border-slate-800 shadow-inner relative overflow-hidden">
             {location ? (
@@ -794,6 +863,45 @@ function RekapView({ currentUser, allHistory, pegawaiList, waConfig, setWaConfig
     return `${formatShort(startD)} - ${formatShort(now)}`;
   };
 
+  // Menentukan Range Start dan End secara global untuk Tabel dan Ranking
+  const now = todayObj.getTime();
+  let rStart = new Date(todayObj);
+  let rEnd = new Date(todayObj);
+
+  if (rekapType === 'harian') { rStart = new Date(now); }
+  else if (rekapType === 'mingguan') { rStart = new Date(now - (7 * 24 * 60 * 60 * 1000)); }
+  else if (rekapType === 'bulanan') { rStart = new Date(now - (30 * 24 * 60 * 60 * 1000)); }
+  else if (rekapType === 'triwulan') { rStart = new Date(now - (90 * 24 * 60 * 60 * 1000)); }
+  else if (rekapType === 'custom' && startDate && endDate) {
+    rStart = new Date(startDate);
+    rEnd = new Date(endDate);
+  } else {
+    rStart = new Date(now - (30 * 24 * 60 * 60 * 1000)); // Default fallback
+  }
+
+  rStart.setHours(0, 0, 0, 0);
+  rEnd.setHours(23, 59, 59, 999);
+
+  // Menghitung jumlah Tanpa Keterangan
+  const getTKCount = (userLogs) => {
+    let tk = 0;
+    let currD = new Date(rStart);
+    const todayMid = new Date(todayObj).setHours(0,0,0,0);
+    
+    while(currD <= rEnd) {
+      if(currD.getDay() !== 0) { // Lewati hari minggu
+        const currMid = currD.getTime();
+        // Hanya hitung jika harinya belum melewati hari ini
+        if (currMid <= todayMid) { 
+          const dailyLogs = userLogs.filter(l => l.dateStr === formatDateIndo(currD));
+          if (dailyLogs.length === 0) tk++;
+        }
+      }
+      currD.setDate(currD.getDate() + 1);
+    }
+    return tk;
+  };
+
   const filteredLogs = getFilteredLogs();
   const isDaily = rekapType === 'harian';
 
@@ -830,33 +938,32 @@ function RekapView({ currentUser, allHistory, pegawaiList, waConfig, setWaConfig
   };
 
   const getWAPesanLaporan = () => {
-    let h = 0, t = 0, tk = 0, k = 0;
-    pegawaiList.forEach(p => {
-      const logs = filteredLogs.filter(l => l.username === p.nip);
-      const s = getStatusKompleks(logs, todayObj);
-      if (s.label === 'TANPA KETERANGAN') tk++;
-      else if (s.isBad) t++;
-      else if (s.label.includes('TEPAT')) h++;
-      else k++;
-    });
-    return `*LAPORAN ABSENSI SATU-LAKAL*\nHari/Tanggal: ${todayStr}\n\n*REKAPITULASI*\n👥 Total: ${pegawaiList.length}\n✅ Hadir Tepat: ${h}\n⚠️ Terlambat/Pulang Awal: ${t}\nℹ️ Sakit/Cuti/DL/BKO: ${k}\n❌ Tanpa Keterangan: ${tk}`;
+    return generateWAPesan(pegawaiList, allHistory, todayObj);
   };
 
   const calculateRanking = () => {
-    const bulananLogs = allHistory.filter(h => h.timestamp >= (todayObj.getTime() - (30 * 24 * 60 * 60 * 1000)));
+    const rangeLogs = allHistory.filter(h => h.timestamp >= rStart.getTime() && h.timestamp <= rEnd.getTime());
     const pegawaiRanking = pegawaiList.filter(p => !p.nama.includes('GELORA KURNIAWAN'));
+    const todayMid = new Date(todayObj).setHours(0,0,0,0);
     
     const scores = pegawaiRanking.map(p => {
-      const logs = bulananLogs.filter(l => l.username === p.nip);
+      const logs = rangeLogs.filter(l => l.username === p.nip);
       let tepat = 0, bad = 0, tk = 0;
-      for(let i=0; i<26; i++){
-        const d = new Date(todayObj.getTime() - (i * 24 * 60 * 60 * 1000));
-        if(d.getDay() === 0) continue; 
-        const dailyLogs = logs.filter(l => l.dateStr === formatDateIndo(d));
-        const st = getStatusKompleks(dailyLogs, d);
-        if (st.label === 'TANPA KETERANGAN') tk++;
-        else if (st.isBad) bad++;
-        else if (st.label.includes('TEPAT')) tepat++;
+      
+      let currD = new Date(rStart);
+      while(currD <= rEnd) {
+        if(currD.getDay() !== 0) { // Lewati hari minggu
+          const currMid = currD.getTime();
+          // Hanya hitung skor jika harinya belum melewati hari ini
+          if (currMid <= todayMid) { 
+            const dailyLogs = logs.filter(l => l.dateStr === formatDateIndo(currD));
+            const st = getStatusKompleks(dailyLogs, currD);
+            if (st.label === 'TANPA KETERANGAN') tk++;
+            else if (st.isBad) bad++;
+            else if (st.label.includes('TEPAT')) tepat++;
+          }
+        }
+        currD.setDate(currD.getDate() + 1);
       }
       return { p, tepat, bad, tk, score: (tepat * 2) - bad - (tk * 3) };
     });
@@ -866,12 +973,75 @@ function RekapView({ currentUser, allHistory, pegawaiList, waConfig, setWaConfig
 
   const rankData = mainTab === 'ranking' ? calculateRanking() : null;
 
+  const exportRekapToExcel = () => {
+    let csv = "NIP,Nama,Bidang,";
+    if (isDaily) csv += "Masuk,Keluar,Status Akhir\n";
+    else csv += "Total Masuk,Lepas Piket,Sakit,Cuti,Dinas Luar,BKO,Tanpa Keterangan\n";
+
+    bidangs.forEach(bidang => {
+      pegawaiList.filter(p => p.bidang === bidang).forEach(p => {
+        const logs = filteredLogs.filter(l => l.username === p.nip);
+        if (isDaily) {
+          const inLog = logs.find(l => l.type === 'Masuk');
+          const outLog = logs.find(l => l.type === 'Keluar');
+          const status = getStatusKompleks(logs, todayObj);
+          csv += `"${p.nip}","${p.nama}","${bidang}","${inLog ? inLog.timeStr : '-'}","${outLog ? outLog.timeStr : '-'}","${status.label}"\n`;
+        } else {
+          const m = logs.filter(l => l.type === 'Masuk').length;
+          const lp = logs.filter(l => l.type === 'Lepas Piket').length;
+          const sk = logs.filter(l => l.type === 'Sakit').length;
+          const ct = logs.filter(l => l.type === 'Cuti').length;
+          const dl = logs.filter(l => l.type === 'Dinas Luar').length;
+          const bko = logs.filter(l => l.type === 'BKO').length;
+          const tk = getTKCount(logs);
+          csv += `"${p.nip}","${p.nama}","${bidang}","${m}","${lp}","${sk}","${ct}","${dl}","${bko}","${tk}"\n`;
+        }
+      });
+    });
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const a = document.createElement('a'); a.href = window.URL.createObjectURL(blob); a.download = `Rekap_Absensi_${rekapType}.csv`; a.click(); showToast("Diekspor ke Excel!");
+  };
+
+  const exportRekapToWord = () => {
+    let tableRows = "";
+    bidangs.forEach(bidang => {
+      tableRows += `<tr><td colspan="${isDaily ? 6 : 10}" style="border: 1px solid black; padding: 8px; background-color: #e2e8f0; font-weight: bold; text-align: center;">BIDANG: ${bidang}</td></tr>`;
+      pegawaiList.filter(p => p.bidang === bidang).forEach(p => {
+        const logs = filteredLogs.filter(l => l.username === p.nip);
+        if (isDaily) {
+          const inLog = logs.find(l => l.type === 'Masuk');
+          const outLog = logs.find(l => l.type === 'Keluar');
+          const status = getStatusKompleks(logs, todayObj);
+          tableRows += `<tr><td style="border: 1px solid black; padding: 5px;">${p.nip}</td><td style="border: 1px solid black; padding: 5px;">${p.nama}</td><td style="border: 1px solid black; padding: 5px;">${bidang}</td><td style="border: 1px solid black; padding: 5px; text-align: center;">${inLog ? inLog.timeStr : '-'}</td><td style="border: 1px solid black; padding: 5px; text-align: center;">${outLog ? outLog.timeStr : '-'}</td><td style="border: 1px solid black; padding: 5px; text-align: center;">${status.label}</td></tr>`;
+        } else {
+          const m = logs.filter(l => l.type === 'Masuk').length;
+          const lp = logs.filter(l => l.type === 'Lepas Piket').length;
+          const sk = logs.filter(l => l.type === 'Sakit').length;
+          const ct = logs.filter(l => l.type === 'Cuti').length;
+          const dl = logs.filter(l => l.type === 'Dinas Luar').length;
+          const bko = logs.filter(l => l.type === 'BKO').length;
+          const tk = getTKCount(logs);
+          tableRows += `<tr><td style="border: 1px solid black; padding: 5px;">${p.nip}</td><td style="border: 1px solid black; padding: 5px;">${p.nama}</td><td style="border: 1px solid black; padding: 5px;">${bidang}</td><td style="border: 1px solid black; padding: 5px; text-align: center;">${m}</td><td style="border: 1px solid black; padding: 5px; text-align: center;">${lp}</td><td style="border: 1px solid black; padding: 5px; text-align: center;">${sk}</td><td style="border: 1px solid black; padding: 5px; text-align: center;">${ct}</td><td style="border: 1px solid black; padding: 5px; text-align: center;">${dl}</td><td style="border: 1px solid black; padding: 5px; text-align: center;">${bko}</td><td style="border: 1px solid black; padding: 5px; text-align: center;">${tk}</td></tr>`;
+        }
+      });
+    });
+
+    let headers = isDaily 
+      ? `<th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">NIP</th><th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">Nama</th><th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">Bidang</th><th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">Masuk</th><th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">Keluar</th><th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">Status Akhir</th>`
+      : `<th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">NIP</th><th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">Nama</th><th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">Bidang</th><th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">Total Masuk</th><th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">Lepas Piket</th><th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">Sakit</th><th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">Cuti</th><th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">Dinas Luar</th><th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">BKO</th><th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">Tanpa Ket.</th>`;
+
+    let html = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Rekap Absen</title></head><body><h2 style="text-align: center; font-family: sans-serif;">Laporan Rekapitulasi Absensi (${rekapType.toUpperCase()})</h2><p style="text-align: center; font-family: sans-serif;">Periode: ${getDateRangeText() || todayStr}</p><table style="border-collapse: collapse; width: 100%; font-family: sans-serif; font-size: 12px;"><thead><tr>${headers}</tr></thead><tbody>${tableRows}</tbody></table></body></html>`;
+    const blob = new Blob(['\ufeff', html], { type: 'application/msword' });
+    const a = document.createElement('a'); a.href = window.URL.createObjectURL(blob); a.download = `Rekap_Absensi_${rekapType}.doc`; a.click(); showToast("Diekspor ke Word!");
+  };
+
   return (
     <div className="glass-card rounded-[3rem] overflow-hidden shadow-2xl">
       <div className="p-8 md:p-10 border-b border-slate-100 dark:border-slate-800 flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
         <div>
           <h2 className="text-2xl font-black text-slate-950 dark:text-white tabular-nums tracking-tighter leading-none">
-            {mainTab === 'rekap' ? (rekapType === 'harian' ? todayStr : `Rekap ${rekapType.toUpperCase()}`) : 'Ranking Absensi'}
+            {rekapType === 'harian' && mainTab === 'rekap' ? todayStr : `${mainTab === 'rekap' ? 'Rekap' : 'Ranking'} ${rekapType.toUpperCase()}`}
           </h2>
           <p className="text-[9px] font-black uppercase text-slate-700 dark:text-slate-500 mt-2">Daftar Kehadiran & Laporan</p>
         </div>
@@ -883,6 +1053,8 @@ function RekapView({ currentUser, allHistory, pegawaiList, waConfig, setWaConfig
           ))}
           {currentUser.role === 'admin' && mainTab === 'rekap' && (
             <>
+              <button onClick={exportRekapToExcel} className="px-4 py-3 bg-emerald-600 text-white rounded-xl font-black text-[9px] uppercase shadow-lg hover:scale-105 transition-transform" title="Eksport ke Excel"><FileSpreadsheet size={14}/></button>
+              <button onClick={exportRekapToWord} className="px-4 py-3 bg-indigo-600 text-white rounded-xl font-black text-[9px] uppercase shadow-lg hover:scale-105 transition-transform" title="Eksport ke Word"><FileText size={14}/></button>
               <button onClick={() => setShowWASettings(true)} className="px-4 py-3 bg-amber-500 text-white rounded-xl font-black text-[9px] uppercase shadow-lg"><BellRing size={14}/></button>
               <button onClick={() => window.open(`https://wa.me/?text=${encodeURIComponent(getWAPesanLaporan())}`, '_blank')} className="px-4 py-3 bg-emerald-600 text-white rounded-xl font-black text-[9px] uppercase shadow-lg"><MessageSquare size={14}/></button>
             </>
@@ -890,38 +1062,36 @@ function RekapView({ currentUser, allHistory, pegawaiList, waConfig, setWaConfig
         </div>
       </div>
 
-      {mainTab === 'rekap' && (
-        <div className="px-8 md:px-10 pt-6 pb-2 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/20">
-          <div className="flex flex-wrap items-center gap-4">
-            <select value={rekapType} onChange={e => setRekapType(e.target.value)} className="p-3 rounded-xl bg-white dark:bg-slate-950 text-[10px] font-black uppercase tracking-widest text-slate-700 dark:text-slate-300 outline-none border border-slate-200 dark:border-slate-800 shadow-sm cursor-pointer hover:border-blue-500 transition-colors">
-              <option value="harian">Harian (Hari Ini)</option>
-              <option value="mingguan">Mingguan (7 Hari Terakhir)</option>
-              <option value="bulanan">Bulanan (30 Hari Terakhir)</option>
-              <option value="triwulan">Triwulan (90 Hari Terakhir)</option>
-              <option value="custom">Pilih Tanggal Manual</option>
-            </select>
+      <div className="px-8 md:px-10 pt-6 pb-2 border-b border-slate-100 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900/20">
+        <div className="flex flex-wrap items-center gap-4">
+          <select value={rekapType} onChange={e => setRekapType(e.target.value)} className="p-3 rounded-xl bg-white dark:bg-slate-950 text-[10px] font-black uppercase tracking-widest text-slate-700 dark:text-slate-300 outline-none border border-slate-200 dark:border-slate-800 shadow-sm cursor-pointer hover:border-blue-500 transition-colors">
+            <option value="harian">Harian (Hari Ini)</option>
+            <option value="mingguan">Mingguan (7 Hari Terakhir)</option>
+            <option value="bulanan">Bulanan (30 Hari Terakhir)</option>
+            <option value="triwulan">Triwulan (90 Hari Terakhir)</option>
+            <option value="custom">Pilih Tanggal Manual</option>
+          </select>
 
-            {rekapType !== 'custom' && (
-              <span className="text-[10px] font-bold text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-3 py-3 rounded-xl border border-slate-200 dark:border-slate-700 whitespace-nowrap shadow-sm">
-                Periode: {getDateRangeText()}
-              </span>
-            )}
+          {rekapType !== 'custom' && (
+            <span className="text-[10px] font-bold text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-3 py-3 rounded-xl border border-slate-200 dark:border-slate-700 whitespace-nowrap shadow-sm">
+              Periode: {getDateRangeText()}
+            </span>
+          )}
 
-            {rekapType === 'custom' && (
-              <div className="flex items-center gap-2">
-                <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="p-3 rounded-xl bg-white dark:bg-slate-950 text-[10px] font-black uppercase text-slate-700 dark:text-slate-300 outline-none border border-slate-200 dark:border-slate-800 shadow-sm dark:[color-scheme:dark]" />
-                <span className="text-xs font-bold text-slate-500">-</span>
-                <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="p-3 rounded-xl bg-white dark:bg-slate-950 text-[10px] font-black uppercase text-slate-700 dark:text-slate-300 outline-none border border-slate-200 dark:border-slate-800 shadow-sm dark:[color-scheme:dark]" />
-              </div>
-            )}
-          </div>
+          {rekapType === 'custom' && (
+            <div className="flex items-center gap-2">
+              <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)} className="p-3 rounded-xl bg-white dark:bg-slate-950 text-[10px] font-black uppercase text-slate-700 dark:text-slate-300 outline-none border border-slate-200 dark:border-slate-800 shadow-sm dark:[color-scheme:dark]" />
+              <span className="text-xs font-bold text-slate-500">-</span>
+              <input type="date" value={endDate} onChange={e => setEndDate(e.target.value)} className="p-3 rounded-xl bg-white dark:bg-slate-950 text-[10px] font-black uppercase text-slate-700 dark:text-slate-300 outline-none border border-slate-200 dark:border-slate-800 shadow-sm dark:[color-scheme:dark]" />
+            </div>
+          )}
         </div>
-      )}
+      </div>
 
       {mainTab === 'ranking' ? (
         <div className="p-10 grid grid-cols-1 md:grid-cols-2 gap-8">
           <div className="space-y-4">
-            <h3 className="text-sm font-black text-emerald-600 uppercase flex items-center gap-2"><Trophy size={18}/> 3 Terbaik Bulan Ini</h3>
+            <h3 className="text-sm font-black text-emerald-600 uppercase flex items-center gap-2"><Trophy size={18}/> 3 Terbaik ({rekapType === 'custom' ? 'Kustom' : rekapType})</h3>
             {rankData.best.map((item, i) => (
               <div key={i} className="glass-card p-5 rounded-2xl border-l-4 border-emerald-500 shadow-sm flex justify-between items-center">
                 <div><p className="font-bold text-xs text-slate-900 dark:text-white">{item.p.nama}</p><p className="text-[9px] text-slate-500 uppercase">{item.p.bidang}</p></div>
@@ -944,18 +1114,18 @@ function RekapView({ currentUser, allHistory, pegawaiList, waConfig, setWaConfig
           <table className="w-full text-left min-w-[800px]">
             <thead className="bg-slate-100 dark:bg-slate-950 text-slate-700 dark:text-slate-500 uppercase text-[9px] font-black tracking-widest">
               <tr>
-                <th className="px-10 py-6">Personel</th>
+                <th className="px-10 py-6">Pegawai</th>
                 {isDaily ? (
                   <><th className="px-6 py-6 text-center">Masuk</th><th className="px-6 py-6 text-center">Keluar</th><th className="px-6 py-6 text-center">Status Akhir</th></>
                 ) : (
-                  <><th className="px-6 py-6 text-center">Total Masuk</th><th className="px-6 py-6 text-center">Khusus (BKO/Sakit)</th><th className="px-6 py-6 text-center">Rekap Data</th></>
+                  <><th className="px-6 py-6 text-center">Total Masuk</th><th className="px-6 py-6 text-center">Lepas Piket</th><th className="px-6 py-6 text-center">Sakit</th><th className="px-6 py-6 text-center">Cuti</th><th className="px-6 py-6 text-center">Dinas Luar</th><th className="px-6 py-6 text-center">BKO</th><th className="px-6 py-6 text-center">Tanpa Ket.</th></>
                 )}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {bidangs.map(bidang => (
                 <React.Fragment key={bidang}>
-                  <tr className="bg-slate-50/50 dark:bg-slate-950/20"><td colSpan="4" className="px-10 py-4 text-blue-600 font-black uppercase text-[8px] tracking-widest">{bidang}</td></tr>
+                  <tr className="bg-slate-50/50 dark:bg-slate-950/20"><td colSpan={isDaily ? 4 : 8} className="px-10 py-4 text-blue-600 font-black uppercase text-[8px] tracking-widest">{bidang}</td></tr>
                   {pegawaiList.filter(p => p.bidang === bidang).map(p => {
                     const logs = filteredLogs.filter(l => l.username === p.nip);
                     
@@ -973,13 +1143,22 @@ function RekapView({ currentUser, allHistory, pegawaiList, waConfig, setWaConfig
                       );
                     } else {
                       const m = logs.filter(l => l.type === 'Masuk').length;
-                      const kh = logs.filter(l => ['Sakit', 'Cuti', 'Dinas Luar', 'Lepas Piket', 'BKO'].includes(l.type)).length;
+                      const lp = logs.filter(l => l.type === 'Lepas Piket').length;
+                      const sk = logs.filter(l => l.type === 'Sakit').length;
+                      const ct = logs.filter(l => l.type === 'Cuti').length;
+                      const dl = logs.filter(l => l.type === 'Dinas Luar').length;
+                      const bko = logs.filter(l => l.type === 'BKO').length;
+                      const tk = getTKCount(logs);
                       return (
                         <tr key={p.nip} className="hover:bg-slate-100/50 dark:hover:bg-slate-800/10 transition-colors">
                           <td className="px-10 py-6"><p className="font-black text-sm text-slate-950 dark:text-white leading-none">{p.nama}</p><p className="text-[9px] font-bold text-slate-600 dark:text-slate-400 mt-2 uppercase">{p.nip}</p></td>
                           <td className="px-6 py-6 text-center font-black text-emerald-600 text-lg">{m}x</td>
-                          <td className="px-6 py-6 text-center font-black text-blue-600 text-lg">{kh}x</td>
-                          <td className="px-6 py-6 text-center"><span className="px-4 py-2 bg-slate-100 dark:bg-slate-800 rounded-xl text-[9px] font-black uppercase text-slate-600">{logs.length} Log Total</span></td>
+                          <td className="px-6 py-6 text-center font-black text-amber-600 text-lg">{lp}x</td>
+                          <td className="px-6 py-6 text-center font-black text-rose-600 text-lg">{sk}x</td>
+                          <td className="px-6 py-6 text-center font-black text-emerald-600 text-lg">{ct}x</td>
+                          <td className="px-6 py-6 text-center font-black text-indigo-600 text-lg">{dl}x</td>
+                          <td className="px-6 py-6 text-center font-black text-blue-600 text-lg">{bko}x</td>
+                          <td className="px-6 py-6 text-center font-black text-slate-500 dark:text-slate-400 text-lg">{tk}x</td>
                         </tr>
                       );
                     }
@@ -1016,17 +1195,9 @@ function WASettingsModal({ waConfig, setWaConfig, onClose }) {
   );
 }
 
-function AutoWAAlert({ onClose, onSend, waConfig, allHistory, pegawaiList }) {
+function AutoWAAlert({ onClose, onSend, waConfig, allHistory, pegawaiList, currentTime }) {
   const handleSend = () => {
-    const today = formatDateIndo(new Date()); const todayLogs = allHistory.filter(h => h.dateStr === today);
-    let hadirCount = 0; let telatCount = 0; let tkCount = 0; let khususCount = 0;
-    pegawaiList.forEach(p => {
-      const logs = todayLogs.filter(l => l.username === p.nip);
-      const isHadir = logs.some(l => l.type === 'Masuk');
-      const isKhusus = logs.some(l => ['Sakit', 'Cuti', 'Dinas Luar', 'Lepas Piket', 'BKO'].includes(l.type));
-      if (isKhusus) khususCount++; else if (isHadir) hadirCount++; else tkCount++;
-    });
-    const text = encodeURIComponent(`*LAPORAN ABSENSI SATU-LAKAL*\nLapas Kelas IIB Kalabahi\n\n👥 Total: ${pegawaiList.length} Orang\n✅ Hadir: ${hadirCount} Orang\nℹ️ Khusus: ${khususCount} Orang\n❌ Tanpa Ket: ${tkCount} Orang`);
+    const text = encodeURIComponent(generateWAPesan(pegawaiList, allHistory, currentTime));
     window.open(waConfig.phone ? `https://wa.me/${waConfig.phone}?text=${text}` : `https://wa.me/?text=${text}`, '_blank');
     onSend();
   };
@@ -1072,7 +1243,7 @@ function AnalitikView({ allHistory, pegawaiList }) {
   return (
     <div className="space-y-8">
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {[{ l: 'Hadir (Masuk/Keluar)', v: hadir, c: 'text-emerald-600' }, { l: 'Total Personel', v: total, c: 'text-slate-600 dark:text-white' }, { l: 'Persentase Real', v: pct+'%', c: 'text-blue-600' }].map(s => (
+        {[{ l: 'Hadir (Masuk/Keluar)', v: hadir, c: 'text-emerald-600' }, { l: 'Total Pegawai', v: total, c: 'text-slate-600 dark:text-white' }, { l: 'Persentase Real', v: pct+'%', c: 'text-blue-600' }].map(s => (
           <div key={s.l} className="glass-card p-10 rounded-[2.5rem] text-center shadow-xl"><p className="text-[9px] font-black uppercase text-slate-700 dark:text-slate-500 mb-4">{s.l}</p><p className={`text-6xl font-black ${s.c}`}>{s.v}</p></div>
         ))}
       </div>
@@ -1098,7 +1269,7 @@ function AnalitikView({ allHistory, pegawaiList }) {
 
       {listKhusus.length > 0 && (
         <div className="glass-card p-8 rounded-[2rem] border-l-4 border-amber-500 bg-amber-50/30 dark:bg-amber-900/10">
-          <h3 className="text-sm font-black uppercase text-amber-700 dark:text-amber-500 mb-4 flex items-center gap-2"><User size={16}/> Daftar Personel Status Khusus</h3>
+          <h3 className="text-sm font-black uppercase text-amber-700 dark:text-amber-500 mb-4 flex items-center gap-2"><User size={16}/> Daftar Pegawai Status Khusus</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {listKhusus.map((k, i) => (
               <div key={i} className="flex justify-between items-center bg-white/50 dark:bg-slate-900/50 p-3 rounded-xl border border-amber-200/50 dark:border-amber-700/30">
@@ -1124,15 +1295,16 @@ function KelolaView({ pegawaiList, passRequests, showToast, db, appId, credentia
   const [confirmDialog, setConfirmDialog] = useState(null);
   const fileInputRef = useRef(null);
 
+  // Kompresi data awal untuk menjaga ukutan kode
   const dataAwal = [
     { nip: "198007232000121001", nama: "M Arfandy, A.Md. IP., S.H., M.H.", bidang: "KALAPAS", jabatan: "Kepala Lembaga Pemasyarakatan" },
     { nip: "198507302009011003", nama: "ABDURRAHMAN HARYONO, S.H.", bidang: "Tata Usaha", jabatan: "KEPALA SUBBAGIAN TATA USAHA" },
-    { nip: "196810191992032001", nama: "OKTOVIYANA LILIYANI LOURU JAGI", bidang: "Tata Usaha", jabatan: "KEPALA URUSAN KEPEGAWAIAN DAN KEUANGAN" },
+    { nip: "196810191992032001", nama: "OKTOVIYANA LILIYANI LOURU JAGI", bidang: "Tata Usaha", jabatan: "KAUR KEPEGAWAIAN DAN KEUANGAN" },
     { nip: "199006102009011001", nama: "ASRIYADI LAGANI, S.H.", bidang: "Tata Usaha", jabatan: "KEPALA URUSAN UMUM" },
     { nip: "199007082009121003", nama: "DANIEL ROBERTO ANIE", bidang: "Tata Usaha", jabatan: "PENGELOLA DATA KEPEGAWAIAN" },
     { nip: "199004212012121001", nama: "ANTONIUS SOEHONO PURWANTO", bidang: "Tata Usaha", jabatan: "OPERATOR MESIN" },
     { nip: "199710102017121001", nama: "RIVALDO FITHOREZA OLANG, S.Sos", bidang: "Tata Usaha", jabatan: "BENDAHARA PENGELUARAN" },
-    { nip: "199804222017122002", nama: "MISYIE AMELIA MABILEHI", bidang: "Tata Usaha", jabatan: "PENGHUBUNG ADMINISTRASI KEPEGAWAIAN" },
+    { nip: "199804222017122002", nama: "MISYIE AMELIA MABILEHI", bidang: "Tata Usaha", jabatan: "PENGHUBUNG ADMINISTRASI" },
     { nip: "199806082020121001", nama: "TRIVAN DANIEL LOMI", bidang: "Tata Usaha", jabatan: "STAF KEPEGAWAIAN" },
     { nip: "200208312022031001", nama: "IRFAN ALFIAN JAE", bidang: "Tata Usaha", jabatan: "STAF KEUANGAN" },
     { nip: "200108022022031001", nama: "ABYESTIANUS TLOIM", bidang: "Tata Usaha", jabatan: "STAF KEUANGAN" },
@@ -1143,22 +1315,22 @@ function KelolaView({ pegawaiList, passRequests, showToast, db, appId, credentia
     { nip: "198503042009011004", nama: "MUHAMAD LUKMAN HINALEDE", bidang: "KPLP", jabatan: "STAF KPLP" },
     { nip: "199102252017121003", nama: "MUKHLIS YUSUF MARO", bidang: "KPLP", jabatan: "STAF KPLP" },
     { nip: "200303242022031001", nama: "MUHAIMIN ABDUL AZIS", bidang: "KPLP", jabatan: "STAF KPLP" },
-    { nip: "200207112025021001", nama: "GELORA KURNIAWAN, S.Tr.Pas.", bidang: "KPLP", jabatan: "PEMBINA KEAMANAN PEMASYARAKATAN AHLI PERTAMA" },
-    { nip: "198602112007031001", nama: "ARNOLDUS ENGE, S.H.", bidang: "Adm Kamtib", jabatan: "KEPALA SEKSI ADMINISTRASI KEAMANAN DAN TATA TERTIB" },
-    { nip: "196804261991031002", nama: "DAVID HABIL OBED LOA", bidang: "Adm Kamtib", jabatan: "KEPALA SUBSEKSI PELAPORAN DAN TATA TERTIB" },
+    { nip: "200207112025021001", nama: "GELORA KURNIAWAN, S.Tr.Pas.", bidang: "KPLP", jabatan: "PEMBINA KEAMANAN PEMASYARAKATAN" },
+    { nip: "198602112007031001", nama: "ARNOLDUS ENGE, S.H.", bidang: "Adm Kamtib", jabatan: "KASI ADMINISTRASI KAMTIB" },
+    { nip: "196804261991031002", nama: "DAVID HABIL OBED LOA", bidang: "Adm Kamtib", jabatan: "KASUBSI PELAPORAN DAN TATA TERTIB" },
     { nip: "198603032009011007", nama: "MARTHEN SONOPAA", bidang: "Adm Kamtib", jabatan: "KEPALA SUBSEKSI KEAMANAN" },
-    { nip: "199807072017121002", nama: "MAULUDIN HAMZAH, Sos.", bidang: "Adm Kamtib", jabatan: "PENGADMINISTRASI PERLENGKAPAN KEAMANAN" },
+    { nip: "199807072017121002", nama: "MAULUDIN HAMZAH, Sos.", bidang: "Adm Kamtib", jabatan: "PENGADMINISTRASI PERLENGKAPAN" },
     { nip: "199910132022031003", nama: "OPNY ANDOARDO SINAWENI", bidang: "Adm Kamtib", jabatan: "STAF KAMTIB" },
-    { nip: "198509252008011001", nama: "SURYANTO AHMAD, S.Sos.", bidang: "Binadikgiatja", jabatan: "KEPALA SEKSI BIMBINGAN NARAPIDANA/ANAK DIDIK DAN KEGIATAN KERJA" },
-    { nip: "196804131992031001", nama: "SEPRENI APRIANUS MALOTE, S.Sos.", bidang: "Binadikgiatja", jabatan: "KEPALA SUBSEKSI PERAWATAN NARAPIDANA/ANAK DIDIK" },
-    { nip: "196903191991031001", nama: "YOSEF WASI", bidang: "Binadikgiatja", jabatan: "KEPALA SUBSEKSI REGISTRASI DAN BIMBINGAN KEMASYARAKATAN" },
+    { nip: "198509252008011001", nama: "SURYANTO AHMAD, S.Sos.", bidang: "Binadikgiatja", jabatan: "KASI BINADIK DAN GIATJA" },
+    { nip: "196804131992031001", nama: "SEPRENI APRIANUS MALOTE, S.Sos.", bidang: "Binadikgiatja", jabatan: "KASUBSI PERAWATAN NAPI/ANAK" },
+    { nip: "196903191991031001", nama: "YOSEF WASI", bidang: "Binadikgiatja", jabatan: "KASUBSI REGISTRASI & BIMKEMAS" },
     { nip: "198712262009011001", nama: "MOE KRIMANTO MOKA, S.H.", bidang: "Binadikgiatja", jabatan: "KEPALA SUBSEKSI KEGIATAN KERJA" },
     { nip: "198103082006041001", nama: "MARKUS DEMATRIUS KORANG LAWANG", bidang: "Binadikgiatja", jabatan: "PENGELOLA HASIL KERJA" },
     { nip: "198510132010121003", nama: "ASYER KOLIMON", bidang: "Binadikgiatja", jabatan: "STAF GIATJA" },
     { nip: "198610212012121001", nama: "DANANG MAKMUR HADI", bidang: "Binadikgiatja", jabatan: "PENGOLAH DATA SIDIK JARI" },
     { nip: "199405022012121001", nama: "AHYARDI ARDIMAN BASO", bidang: "Binadikgiatja", jabatan: "STAF REGISTRASI" },
     { nip: "199302182017121002", nama: "ANDRYAN HENDRICHUS KOLLY", bidang: "Binadikgiatja", jabatan: "PENGELOLA DAN PENGOLAH MAKANAN" },
-    { nip: "199511222017121001", nama: "ROBERT STILMAN BILL ASBANU", bidang: "Binadikgiatja", jabatan: "PENGADMINISTRASI LAYANAN KUNJUNGAN" },
+    { nip: "199511222017121001", nama: "ROBERT STILMAN BILL ASBANU", bidang: "Binadikgiatja", jabatan: "PENGADMINISTRASI LAYANAN" },
     { nip: "199812202022031004", nama: "ESA PUTRA NURATIM FOEKH", bidang: "Binadikgiatja", jabatan: "STAF REGISTRASI" },
     { nip: "200211252025062006", nama: "MARIA HERLINA SASI", bidang: "Binadikgiatja", jabatan: "STAF REGISTRASI" }
   ];
@@ -1170,23 +1342,17 @@ function KelolaView({ pegawaiList, passRequests, showToast, db, appId, credentia
     
     const reader = new FileReader();
     reader.onload = (event) => {
-      const text = event.target.result;
-      const lines = text.split('\n');
+      const lines = event.target.result.split('\n');
       const parsedData = [];
-      
       for (let i = 1; i < lines.length; i++) {
         if (!lines[i].trim()) continue;
         const cols = lines[i].split(',').map(c => c.replace(/"/g, '').trim());
-        if (cols.length >= 3) {
-          parsedData.push({ nip: cols[0], nama: cols[1], bidang: cols[2], jabatan: cols[3] || 'Staf' });
-        }
+        if (cols.length >= 3) parsedData.push({ nip: cols[0], nama: cols[1], bidang: cols[2], jabatan: cols[3] || 'Staf' });
       }
-      
       if (parsedData.length > 0) setPreviewData(parsedData);
       else showToast("Format file kosong atau tidak valid", "error");
     };
-    reader.readAsText(file);
-    e.target.value = null; // Reset input
+    reader.readAsText(file); e.target.value = null; 
   };
 
   const handleGenerate = async () => {
@@ -1250,14 +1416,14 @@ function KelolaView({ pegawaiList, passRequests, showToast, db, appId, credentia
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white dark:bg-slate-900 p-8 rounded-3xl shadow-lg border border-white/5 gap-6">
         <div>
           <h3 className="text-2xl font-black text-slate-950 dark:text-white">Database Pegawai</h3>
-          <p className="text-[9px] font-bold text-slate-700 dark:text-slate-500 uppercase mt-1">Personel Terdaftar: {pegawaiList.length}</p>
+          <p className="text-[9px] font-bold text-slate-700 dark:text-slate-500 uppercase mt-1">Pegawai Terdaftar: {pegawaiList.length}</p>
         </div>
         <div className="flex flex-wrap gap-3 w-full md:w-auto">
           {/* Input Hidden untuk Impor File */}
           <input type="file" accept=".csv" ref={fileInputRef} onChange={handleImportCSV} className="hidden" />
 
           <button onClick={() => setPreviewData(dataAwal)} className="px-5 py-4 bg-purple-600 text-white rounded-2xl font-black uppercase text-[9px] btn-3d shadow-xl flex items-center gap-2"><Wand2 size={14}/> Sinkronisasi</button>
-          <button onClick={() => setShowAddModal(true)} className="px-5 py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[9px] btn-3d shadow-xl flex items-center gap-2"><Plus size={14}/> Tambah Personel</button>
+          <button onClick={() => setShowAddModal(true)} className="px-5 py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[9px] btn-3d shadow-xl flex items-center gap-2"><Plus size={14}/> Tambah Pegawai</button>
           
           <div className="h-full w-px bg-slate-200 dark:bg-slate-700 hidden md:block mx-1"></div>
 
@@ -1273,7 +1439,7 @@ function KelolaView({ pegawaiList, passRequests, showToast, db, appId, credentia
             <div className="text-left"><p className="font-black text-sm text-slate-950 dark:text-white leading-none">{p.nama}</p><p className="text-[9px] font-bold text-slate-600 dark:text-slate-400 mt-2 uppercase">{p.nip} | <span className="text-blue-600">{p.bidang}</span></p></div>
             <div className="flex gap-2 shrink-0">
               <button onClick={() => setTargetPassUser(p)} className="p-3 bg-amber-50 dark:bg-amber-900/20 text-amber-600 rounded-xl" title="Lihat/Ubah Sandi"><Key size={14}/></button>
-              <button onClick={() => setConfirmDialog({ title: "Hapus Personel", message: `Yakin ingin menghapus ${p.nama}?`, isDanger: true, onConfirm: async () => { setConfirmDialog(null); await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pegawai', p.id)); showToast("Pegawai dihapus"); } })} className="p-3 bg-rose-50 dark:bg-rose-900/20 text-rose-600 rounded-xl"><Trash2 size={14}/></button>
+              <button onClick={() => setConfirmDialog({ title: "Hapus Pegawai", message: `Yakin ingin menghapus ${p.nama}?`, isDanger: true, onConfirm: async () => { setConfirmDialog(null); await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pegawai', p.id)); showToast("Pegawai dihapus"); } })} className="p-3 bg-rose-50 dark:bg-rose-900/20 text-rose-600 rounded-xl"><Trash2 size={14}/></button>
             </div>
           </div>
         ))}
@@ -1308,7 +1474,7 @@ function AddPegawaiModal({ db, appId, onClose, showToast }) {
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md">
       <div className="glass-card p-10 rounded-[3rem] max-w-sm w-full border border-white/10 shadow-2xl animate-in zoom-in">
         <UserPlus size={40} className="text-blue-500 mx-auto mb-4" />
-        <h2 className="text-xl font-black mb-6 text-center text-slate-950 dark:text-white">Tambah Personel</h2>
+        <h2 className="text-xl font-black mb-6 text-center text-slate-950 dark:text-white">Tambah Pegawai</h2>
         <form onSubmit={handleSubmit} className="space-y-4 text-left">
           <input type="text" value={nip} onChange={e=>setNip(e.target.value)} placeholder="NIP Pegawai" className="w-full px-5 py-3 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold" />
           <input type="text" value={nama} onChange={e=>setNama(e.target.value)} placeholder="Nama Lengkap" className="w-full px-5 py-3 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold" />
@@ -1426,13 +1592,12 @@ function AdminEditHistoryModal({ log, db, appId, onClose, showToast }) {
       const end = new Date(editEndDate);
 
       if (end < start) {
-        showToast("Tanggal selesai tidak boleh lebih awal dari tanggal mulai!", "error");
+        showToast("Tanggal selesai tidak boleh lebih awal!", "error");
         setIsSubmitting(false);
         return;
       }
 
       const [hour, minute] = editTime.split(':').map(Number);
-      
       let currentDate = new Date(start);
       let isFirst = true;
 
@@ -1453,21 +1618,14 @@ function AdminEditHistoryModal({ log, db, appId, onClose, showToast }) {
             username: log.username, displayName: log.displayName, type,
             timestamp: ts, dateStr: dateStr, timeStr: editTime, photoStr: log.photoStr || null,
             location: log.location || { manual: true, lat: -8.219515, lng: 124.513346 },
-            distance: log.distance || 0,
-            deviceVerified: true, isServerSynced: true, antiManipulationEnabled: true, timezone: 'WITA', isAuto: true
+            distance: log.distance || 0, deviceVerified: true, isServerSynced: true, antiManipulationEnabled: true, timezone: 'WITA', isAuto: true
           });
         }
-        
         currentDate.setDate(currentDate.getDate() + 1); 
       }
-
-      showToast(start.getTime() === end.getTime() ? "Pembaruan absensi berhasil!" : "Data massal berhasil dibuat!"); 
+      showToast(start.getTime() === end.getTime() ? "Berhasil diperbarui!" : "Data massal berhasil dibuat!"); 
       onClose(); 
-    } catch (err) { 
-      showToast("Gagal menyimpan perubahan", "error"); 
-    } finally {
-      setIsSubmitting(false);
-    }
+    } catch (err) { showToast("Gagal menyimpan", "error"); } finally { setIsSubmitting(false); }
   };
   
   return (
