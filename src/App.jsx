@@ -271,7 +271,7 @@ function LoginPage({ onLogin, credentials, pegawaiList, isDarkMode, toggleDarkMo
         }}
       />
       {/* Overlay Gelap untuk memastikan form login tetap terbaca jelas di atas foto */}
-      <div className="absolute inset-0 z-0 bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-[3px]"></div>
+      <div className="absolute inset-0 z-0 bg-slate-900/40 dark:bg-slate-950/60"></div>
       {/* ========================================== */}
 
       <button onClick={toggleDarkMode} className="absolute top-8 right-8 p-4 glass-card rounded-2xl transition-transform hover:scale-110 z-10 border border-white/20">
