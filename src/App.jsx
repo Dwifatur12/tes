@@ -689,7 +689,7 @@ function AbsenView({ currentUser, currentTime, allHistory, showToast, appId, db,
         setIsTrackingLocation(false); 
         if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current); 
       },
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 5000 }
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
     );
   };
 
@@ -773,12 +773,14 @@ function AbsenView({ currentUser, currentTime, allHistory, showToast, appId, db,
           <div className="aspect-video bg-slate-900 rounded-[2rem] flex flex-col items-center justify-center border-4 border-slate-200 dark:border-slate-800 shadow-inner relative overflow-hidden">
             {location ? (
               <>
-                <iframe title="Peta Lokasi" src={`https://maps.google.com/maps?q=${location.lat},${location.lng}&z=16&output=embed`} className="absolute inset-0 w-full h-full opacity-60 dark:opacity-40 pointer-events-none" frameBorder="0" />
-                <div className="text-center animate-in zoom-in z-10 bg-slate-900/70 p-5 rounded-2xl backdrop-blur-md border border-white/10 shadow-2xl">
-                  <Activity size={32} className={`${isTrackingLocation ? 'text-emerald-500 animate-bounce' : 'text-blue-500'} mx-auto mb-3`}/>
-                  <p className="text-white font-black text-xl tracking-tight">Sinyal GPS Terkunci</p>
-                  <p className="text-[10px] font-bold text-slate-300 mt-3 uppercase tracking-widest font-mono">Lat: {location.lat.toFixed(5)} <br/> Lng: {location.lng.toFixed(5)}</p>
-                  <p className="text-[9px] font-black text-blue-400 mt-2 uppercase tracking-widest bg-blue-900/40 px-3 py-1 rounded-full inline-block">Jarak ke Lapas: {dist?.toFixed(2)} KM</p>
+                <iframe title="Peta Lokasi" src={`https://maps.google.com/maps?q=${location.lat},${location.lng}&z=16&output=embed`} className="absolute inset-0 w-full h-full opacity-80 dark:opacity-70 pointer-events-none" frameBorder="0" />
+                <div className="absolute bottom-4 left-4 animate-in zoom-in z-10 bg-slate-900/80 p-3 md:p-4 rounded-2xl backdrop-blur-md border border-white/10 shadow-xl flex items-center gap-3 max-w-[85%]">
+                  <Activity size={24} className={`${isTrackingLocation ? 'text-emerald-500 animate-bounce' : 'text-blue-500'} shrink-0`}/>
+                  <div className="text-left">
+                    <p className="text-white font-black text-xs md:text-sm tracking-tight leading-none">GPS Terkunci</p>
+                    <p className="text-[9px] font-bold text-slate-300 mt-1 md:mt-1.5 uppercase tracking-widest font-mono leading-none">Lat: {location.lat.toFixed(5)} | Lng: {location.lng.toFixed(5)}</p>
+                    <p className="text-[9px] font-black text-blue-400 mt-1 md:mt-1.5 uppercase tracking-widest bg-blue-900/50 px-2 py-0.5 rounded flex w-fit leading-none">Jarak: {dist?.toFixed(2)} KM</p>
+                  </div>
                 </div>
               </>
             ) : (
