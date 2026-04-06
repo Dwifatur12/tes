@@ -652,44 +652,47 @@ function AbsenView({ currentUser, currentTime, allHistory, showToast, appId, db,
     }, 2000);
   };
 
-  const fetchIPLocation = async () => {
-    try {
-      const res = await fetch('https://get.geojs.io/v1/ip/geo.json');
-      const data = await res.json();
-      if (data.latitude && data.longitude) {
-        setLocation({ lat: parseFloat(data.latitude), lng: parseFloat(data.longitude), manual: false, bypass: true });
-        setDist(getDistanceInKm(parseFloat(data.latitude), parseFloat(data.longitude), TARGET_LAT, TARGET_LNG));
-        showToast("Keamanan dilewati: Menampilkan lokasi jaringan riil", "success");
-      } else throw new Error();
-    } catch (err) {
-      showToast("Sinyal GPS diblokir total oleh perangkat", "error");
-    }
-  };
-
   const toggleLocationTracking = () => {
     if (isTrackingLocation) {
       if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
       setIsTrackingLocation(false); showToast("Pelacakan GPS dihentikan"); return;
     }
-    showToast("Meminta akses lokasi real-time..."); setIsTrackingLocation(true);
+    showToast("Mencari satelit GPS... Harap berada di luar ruangan.", "success"); 
+    setIsTrackingLocation(true);
 
     if (!navigator.geolocation) {
-      fetchIPLocation();
+      showToast("Browser Anda tidak mendukung fitur GPS.", "error");
+      setIsTrackingLocation(false);
       return;
     }
 
     watchIdRef.current = navigator.geolocation.watchPosition(
       (pos) => {
-        const { latitude, longitude } = pos.coords;
+        const { latitude, longitude, accuracy } = pos.coords;
+        
+        // Mencegah lokasi masuk jika akurasi lebih buruk dari 100 meter (kemungkinan dari IP/Tower Seluler)
+        if (accuracy > 100) {
+          showToast(`Sinyal lemah (Akurasi ${Math.round(accuracy)}m). Tunggu sebentar atau cari tempat terbuka...`, "error");
+          return; // Jangan set lokasi dulu sampai dapat sinyal presisi
+        }
+
         setLocation({ lat: latitude, lng: longitude });
         setDist(getDistanceInKm(latitude, longitude, TARGET_LAT, TARGET_LNG));
       },
       (err) => { 
-        fetchIPLocation();
+        // Jika gagal karena timeout atau ditolak, JANGAN otomatis pakai fetchIPLocation yang bikin melenceng ber-kilometer
+        if (err.code === err.PERMISSION_DENIED) {
+          showToast("Izin GPS ditolak oleh browser Anda!", "error");
+        } else if (err.code === err.TIMEOUT) {
+          showToast("Sinyal GPS lambat. Pastikan Anda tidak berada di dalam ruangan.", "error");
+        } else {
+          showToast("Gagal mengunci sinyal satelit GPS asli.", "error");
+        }
         setIsTrackingLocation(false); 
         if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current); 
       },
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 10000 }
+      // Berikan waktu 20 detik agar HP punya waktu menyalakan hardware GPS, dan wajibkan Akurasi Tinggi
+      { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
     );
   };
 
@@ -744,7 +747,7 @@ function AbsenView({ currentUser, currentTime, allHistory, showToast, appId, db,
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
       <canvas ref={canvasRef} className="hidden" />
-        <div className="glass-card p-6 md:p-10 rounded-[3rem] relative overflow-hidden shadow-2xl">
+      <div className="glass-card p-6 md:p-10 rounded-[3rem] relative overflow-hidden shadow-2xl">
         <h3 className="text-[10px] font-black uppercase text-slate-700 dark:text-slate-500 mb-6 flex items-center gap-2"><Camera size={14} className="text-blue-600"/> Verifikasi Biometrik Wajah</h3>
         <div className="aspect-[3/4] md:aspect-video bg-slate-900 rounded-[2rem] overflow-hidden relative border-4 border-slate-200 dark:border-slate-800 shadow-inner">
           {!photo ? (
