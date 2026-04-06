@@ -266,7 +266,7 @@ function LoginPage({ onLogin, credentials, pegawaiList, isDarkMode, toggleDarkMo
           // Saat Anda memasang kode ini di server Anda sendiri, hapus link Unsplash ini
           // dan ganti dengan path file Anda, contohnya menjadi: 
           // backgroundImage: `url('./WhatsApp Image 2025-08-05 at 07.51.55_d078491d.jpg')`
-          backgroundImage: `url('./WhatsApp Image 2025-08-05 at 07.51.55_d078491d.jpg')` 
+          backgroundImage: `url('https://images.unsplash.com/photo-1497366216548-37526070297c?q=80&w=2069&auto=format&fit=crop')` 
         }}
       />
       {/* Overlay Gelap untuk memastikan form login tetap terbaca jelas di atas foto */}
