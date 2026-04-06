@@ -18,12 +18,13 @@ import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged }
 import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, query, writeBatch, setDoc } from 'firebase/firestore';
 
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
-  apiKey: "", 
-  authDomain: "default-app-id.firebaseapp.com",
-  projectId: "default-app-id",
-  storageBucket: "default-app-id.appspot.com",
-  messagingSenderId: "123456789",
-  appId: "1:123456789:web:abcdef"
+  apiKey: "AIzaSyBeVz1veJfe_9vNw-sZTnEaiBn860pQrFA",
+  authDomain: "aplikasi-absen-2cf3f.firebaseapp.com",
+  projectId: "aplikasi-absen-2cf3f",
+  storageBucket: "aplikasi-absen-2cf3f.firebasestorage.app",
+  messagingSenderId: "783186509092",
+  appId: "1:783186509092:web:9ccb6ed22fdc72c468c7b1",
+  measurementId: "G-S2MYY30NGJ"
 };
 
 const app = initializeApp(firebaseConfig);
@@ -65,6 +66,7 @@ const formatDateIndo = (date) => {
   }).format(date);
 };
 
+// Fungsi Bantuan Hitung Selisih Waktu (Menit)
 const getMinutesDiff = (limitH, limitM, actualH, actualM) => {
   return (actualH * 60 + actualM) - (limitH * 60 + limitM);
 };
@@ -90,7 +92,7 @@ export default function App() {
   const [pegawaiList, setPegawaiList] = useState([]);
   const [credentials, setCredentials] = useState([]);
   const [allHistory, setAllHistory] = useState([]);
-  const [passRequests, setPassRequests] = useState([]); 
+  const [passRequests, setPassRequests] = useState([]); // State untuk Lupa Password
   
   const [pengumumanData, setPengumumanData] = useState({ 
     id: null, 
@@ -183,8 +185,8 @@ export default function App() {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@200;400;600;800&display=swap');
         * { font-family: 'Plus Jakarta Sans', sans-serif; }
-        .glass-card { background: rgba(255, 255, 255, 0.85); backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.5); box-shadow: 0 20px 50px rgba(0,0,0,0.05); }
-        .dark .glass-card { background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(255, 255, 255, 0.05); box-shadow: 0 20px 50px rgba(0,0,0,0.3); }
+        .glass-card { background: rgba(255, 255, 255, 0.75); backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.5); box-shadow: 0 20px 50px rgba(0,0,0,0.05); }
+        .dark .glass-card { background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(255, 255, 255, 0.05); box-shadow: 0 20px 50px rgba(0,0,0,0.3); }
         .btn-3d { transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); box-shadow: 0 4px 0 rgba(30, 64, 175, 0.5); }
         .btn-3d:active { transform: translateY(2px); box-shadow: 0 1px 0 rgba(30, 64, 175, 0.5); }
         .laser-line { width: 100%; height: 2px; background: #3b82f6; box-shadow: 0 0 15px #3b82f6; position: absolute; animation: scan 2s infinite linear; z-index: 10; }
@@ -254,56 +256,38 @@ function LoginPage({ onLogin, credentials, pegawaiList, isDarkMode, toggleDarkMo
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-6 relative overflow-hidden">
-      
-      {/* ========================================== */}
-      {/* LAYER BACKGROUND FOTO LAPAS KALABAHI */}
-      {/* ========================================== */}
-      <div 
-        className="absolute inset-0 z-0 bg-cover bg-center bg-no-repeat transition-transform duration-[20000ms] hover:scale-105"
-        style={{ 
-          // CATATAN PENTING: 
-          // Saat Anda memasang kode ini di server Anda sendiri, hapus link Unsplash ini
-          // dan ganti dengan path file Anda, contohnya menjadi: 
-          // backgroundImage: `url('./WhatsApp Image 2025-08-05 at 07.51.55_d078491d.jpg')`
-          backgroundImage: `url('https://images.unsplash.com/photo-1497366216548-37526070297c?q=80&w=2069&auto=format&fit=crop')` 
-        }}
-      />
-      {/* Overlay Gelap untuk memastikan form login tetap terbaca jelas di atas foto */}
-      <div className="absolute inset-0 z-0 bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-[3px]"></div>
-      {/* ========================================== */}
-
-      <button onClick={toggleDarkMode} className="absolute top-8 right-8 p-4 glass-card rounded-2xl transition-transform hover:scale-110 z-10 border border-white/20">
-        {isDarkMode ? <Sun className="text-yellow-400" size={20}/> : <Moon className="text-white drop-shadow-md" size={20}/>}
+    <div className="min-h-screen flex items-center justify-center p-6 bg-slate-100 dark:bg-slate-950 relative">
+      <button onClick={toggleDarkMode} className="absolute top-8 right-8 p-4 glass-card rounded-2xl transition-transform hover:scale-110">
+        {isDarkMode ? <Sun className="text-yellow-500" size={20}/> : <Moon className="text-blue-600" size={20}/>}
       </button>
 
-      <div className="glass-card p-10 rounded-[3rem] w-full max-w-sm text-center border border-white/20 shadow-2xl z-10 relative">
-        <Shield size={50} className="text-blue-600 dark:text-blue-500 mx-auto mb-6 drop-shadow-lg" />
-        <h1 className="text-4xl font-black tracking-tighter dark:text-white leading-tight text-slate-900">SATU-LAKAL</h1>
+      <div className="glass-card p-10 rounded-[3rem] w-full max-w-sm text-center border border-white/5 shadow-2xl">
+        <Shield size={50} className="text-blue-600 mx-auto mb-6" />
+        <h1 className="text-4xl font-black tracking-tighter dark:text-white leading-tight text-slate-950">SATU-LAKAL</h1>
         <p className="text-[9px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-400 mt-2 mb-10 leading-relaxed px-4">(Sistem Absensi Terpadu Lapas Kalabahi)</p>
 
         <form onSubmit={handleSubmit} className="space-y-4 text-left">
           <div className="space-y-1">
-            <label className="text-[9px] font-black uppercase tracking-widest text-slate-700 dark:text-slate-400 ml-2">NIP Pegawai</label>
-            <input type="text" value={nip} onChange={e => setNip(e.target.value)} className="w-full px-5 py-4 bg-white/80 dark:bg-slate-900/80 border border-slate-200/50 dark:border-slate-800/50 rounded-2xl outline-none focus:border-blue-500 font-bold dark:text-white transition-all text-slate-950 shadow-inner backdrop-blur-md" placeholder="Masukkan NIP" />
+            <label className="text-[9px] font-black uppercase tracking-widest text-slate-700 dark:text-slate-500 ml-2">NIP Pegawai</label>
+            <input type="text" value={nip} onChange={e => setNip(e.target.value)} className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl outline-none focus:border-blue-500 font-bold dark:text-white transition-all text-slate-950 shadow-inner" placeholder="Masukkan NIP" />
           </div>
           <div className="space-y-1 relative">
             <div className="flex justify-between items-end">
-              <label className="text-[9px] font-black uppercase tracking-widest text-slate-700 dark:text-slate-400 ml-2">Password</label>
+              <label className="text-[9px] font-black uppercase tracking-widest text-slate-700 dark:text-slate-500 ml-2">Password</label>
             </div>
             <div className="relative">
-              <input type={showPassword ? "text" : "password"} value={pass} onChange={e => setPass(e.target.value)} className="w-full pl-5 pr-12 py-4 bg-white/80 dark:bg-slate-900/80 border border-slate-200/50 dark:border-slate-800/50 rounded-2xl outline-none focus:border-blue-500 font-bold dark:text-white transition-all text-slate-950 shadow-inner backdrop-blur-md" placeholder="Masukkan Password" />
-              <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 hover:text-blue-600 transition-colors">
+              <input type={showPassword ? "text" : "password"} value={pass} onChange={e => setPass(e.target.value)} className="w-full pl-5 pr-12 py-4 bg-slate-100 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl outline-none focus:border-blue-500 font-bold dark:text-white transition-all text-slate-950 shadow-inner" placeholder="Masukkan Password" />
+              <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-blue-500 transition-colors">
                 {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
               </button>
             </div>
           </div>
-          <button type="submit" className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest mt-6 btn-3d shadow-blue-600/50 hover:bg-blue-700 transition-colors">Masuk Sekarang</button>
+          <button type="submit" className="w-full py-5 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest mt-6 btn-3d">Masuk Sekarang</button>
         </form>
         
-        <div className="mt-8 text-[9px] font-bold text-slate-600 dark:text-slate-400 flex flex-col items-center justify-center gap-2 mx-auto uppercase tracking-widest">
+        <div className="mt-8 text-[9px] font-bold text-slate-500 flex flex-col items-center justify-center gap-2 mx-auto uppercase tracking-widest">
           <p className="flex items-center gap-1"><HelpCircle size={14}/> Lupa password / Butuh bantuan?</p>
-          <button onClick={() => setShowForgotModal(true)} className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 font-black transition-colors">Hubungi Admin / Reset Sandi</button>
+          <button onClick={() => setShowForgotModal(true)} className="text-blue-600 dark:text-blue-400 hover:underline">Hubungi Admin / Reset Sandi</button>
         </div>
       </div>
 
@@ -370,6 +354,7 @@ function MainDashboard({ currentUser, pegawaiList, allHistory, credentials, pass
     { id: 'kelola', label: 'Pegawai', icon: Users, admin: true },
   ];
 
+  // Auto WA Checker (Admin Only)
   useEffect(() => {
     if (currentUser.role !== 'admin' || !waConfig.enabled || !waConfig.phone) return;
     const interval = setInterval(() => {
@@ -380,6 +365,7 @@ function MainDashboard({ currentUser, pegawaiList, allHistory, credentials, pass
     return () => clearInterval(interval);
   }, [currentTime, waConfig, lastWADate, currentUser.role]);
 
+  // AUTO BKO UNTUK GELORA KURNIAWAN
   useEffect(() => {
     if (pegawaiList.length === 0 || !db || !appId) return;
     const gelora = pegawaiList.find(p => p.nama.includes('GELORA KURNIAWAN'));
@@ -615,6 +601,7 @@ function AbsenView({ currentUser, currentTime, allHistory, showToast, appId, db,
         setDist(getDistanceInKm(latitude, longitude, TARGET_LAT, TARGET_LNG));
       },
       (err) => { 
+        // Bypass aturan keamanan browser (jika HTTP atau akses diblokir pengguna)
         fetchIPLocation();
         setIsTrackingLocation(false); 
         if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current); 
@@ -629,15 +616,6 @@ function AbsenView({ currentUser, currentTime, allHistory, showToast, appId, db,
 
     if (currentTime.getDay() === 0) {
       return showToast("Sistem menolak: Hari Minggu tidak ada jadwal absensi.", "error");
-    }
-
-    if (['Masuk', 'Keluar'].includes(absenType)) {
-      if (!location) {
-        return showToast("Harap mulai Lacak GPS terlebih dahulu!", "error");
-      }
-      if (dist > 0.1) {
-        return showToast(`DITOLAK! Anda berada ${(dist * 1000).toFixed(0)} meter dari Lapas. Jarak maksimal adalah 100 meter.`, "error");
-      }
     }
 
     if (!location) {
@@ -843,6 +821,7 @@ function RekapView({ currentUser, allHistory, pegawaiList, waConfig, setWaConfig
 
   const calculateRanking = () => {
     const bulananLogs = allHistory.filter(h => h.timestamp >= (todayObj.getTime() - (30 * 24 * 60 * 60 * 1000)));
+    // Kecualikan Gelora Kurniawan dari perhitungan ranking
     const pegawaiRanking = pegawaiList.filter(p => !p.nama.includes('GELORA KURNIAWAN'));
     
     const scores = pegawaiRanking.map(p => {
@@ -1006,7 +985,7 @@ function WASettingsModal({ waConfig, setWaConfig, onClose }) {
         <form onSubmit={handleSave} className="space-y-4 text-left mt-6">
           <select value={enabled} onChange={e => setEnabled(e.target.value === 'true')} className="w-full p-4 bg-slate-100 dark:bg-slate-900 rounded-2xl font-bold text-xs"><option value="false">Nonaktifkan</option><option value="true">Aktifkan Pengingat</option></select>
           <input type="text" value={phone} onChange={e => setPhone(e.target.value)} placeholder="Nomor WA (62...)" className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold" />
-          <input type="time" value={time} onChange={e => setTime(e.target.value)} className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold dark:[color-scheme:dark]" />
+          <input type="time" value={time} onChange={e => setTime(e.target.value)} className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold" />
           <button type="submit" className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black uppercase text-[10px] mt-2 btn-3d">Simpan</button>
           <button type="button" onClick={onClose} className="w-full py-2 text-slate-600 text-[9px] font-black uppercase mt-2">Batal</button>
         </form>
@@ -1407,6 +1386,7 @@ function AdminEditHistoryModal({ log, db, appId, onClose, showToast }) {
   const [type, setType] = useState(log.type); 
   const [isSubmitting, setIsSubmitting] = useState(false);
   
+  // Ekstrak timestamp ke format input date standar YYYY-MM-DD
   const dObj = new Date(log.timestamp || Date.now());
   const yyyy = dObj.getFullYear();
   const mm = String(dObj.getMonth() + 1).padStart(2, '0');
@@ -1435,6 +1415,7 @@ function AdminEditHistoryModal({ log, db, appId, onClose, showToast }) {
       let currentDate = new Date(start);
       let isFirst = true;
 
+      // Loop untuk memproses rentang tanggal
       while (currentDate <= end) {
         const targetDate = new Date(currentDate);
         targetDate.setHours(hour, minute, 0, 0);
@@ -1443,11 +1424,13 @@ function AdminEditHistoryModal({ log, db, appId, onClose, showToast }) {
         const ts = targetDate.getTime();
 
         if (isFirst) {
+          // Update log yang sedang diedit di hari pertama
           await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'absensi', log.id), { 
             type, timeStr: editTime, dateStr: dateStr, timestamp: ts
           }); 
           isFirst = false;
         } else {
+          // Tambahkan duplikat log baru untuk hari-hari berikutnya
           await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'absensi'), {
             username: log.username, displayName: log.displayName, type,
             timestamp: ts, dateStr: dateStr, timeStr: editTime, photoStr: log.photoStr || null,
@@ -1457,7 +1440,7 @@ function AdminEditHistoryModal({ log, db, appId, onClose, showToast }) {
           });
         }
         
-        currentDate.setDate(currentDate.getDate() + 1); 
+        currentDate.setDate(currentDate.getDate() + 1); // Lanjut hari berikutnya
       }
 
       showToast(start.getTime() === end.getTime() ? "Pembaruan absensi berhasil!" : "Data massal berhasil dibuat!"); 
