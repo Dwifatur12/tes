@@ -729,6 +729,13 @@ function AbsenView({ currentUser, currentTime, allHistory, pegawaiList, location
         const { latitude, longitude, accuracy } = pos.coords;
         const now = Date.now();
 
+        // 1. Abaikan koordinat dengan akurasi sangat rendah (biasanya karena pantulan BTS/WiFi di detik-detik awal)
+        if (accuracy > 2000) { 
+          console.log(`Mencari sinyal satelit GPS yang lebih akurat... Saat ini: ${Math.round(accuracy)}m`);
+          return; // Langsung return agar titik yang salah tidak masuk ke histori dan memicu False Positive Fake GPS
+        }
+
+        // 2. Deteksi Fake GPS hanya dengan koordinat yang sudah akurat
         let fakeGpsDetected = false;
         locationHistoryRef.current = locationHistoryRef.current.filter(p => now - p.time <= 60000);
         
@@ -739,15 +746,15 @@ function AbsenView({ currentUser, currentTime, allHistory, pegawaiList, location
         if (fakeGpsDetected) {
           setIsFakeGpsBlocked(true);
           showToast("Indikasi Fake GPS! Pergerakan tidak wajar (>10 KM / Menit) diblokir.", "error");
+          return;
         } else {
           setIsFakeGpsBlocked(false);
         }
 
-        // Tetap catat lokasi agar sistem bisa pulih secara otomatis dari False Positive GPS loncat
+        // 3. Catat lokasi akurat ke histori
         locationHistoryRef.current.push({lat: latitude, lng: longitude, time: now});
 
-        // Toleransi akurasi diperbesar agar pegawai yang di dalam ruangan tetap bisa mengunci GPS
-        if (accuracy > 2000) { showToast(`Sinyal lemah (Akurasi ${Math.round(accuracy)}m). Tunggu sebentar atau cari tempat terbuka...`, "error"); return; }
+        // 4. Update peta dan jarak
         setLocation({ lat: latitude, longitude }); setDist(getDistanceInKm(latitude, longitude, locationConfig.lat, locationConfig.lng));
       },
       (err) => { 
