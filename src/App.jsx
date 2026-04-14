@@ -15,7 +15,7 @@ import {
 // ==========================================
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, query, writeBatch, setDoc } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, onSnapshot, doc, updateDoc, deleteDoc, query, writeBatch, setDoc, getDocs } from 'firebase/firestore';
 
 const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {
   apiKey: "AIzaSyBeVz1veJfe_9vNw-sZTnEaiBn860pQrFA",
@@ -60,7 +60,7 @@ const getMinutesDiff = (limitH, limitM, actualH, actualM) => {
 };
 
 // ==========================================
-// FUNGSI HELPER GLOBAL (EXCEL, WORD, PRINT, KETERANGAN)
+// FUNGSI HELPER GLOBAL
 // ==========================================
 const loadXlsxScript = () => new Promise((resolve, reject) => {
   if (window.XLSX) return resolve(window.XLSX);
@@ -106,7 +106,6 @@ const printHTMLTable = (title, tableHtml) => {
           .detail { font-size: 10px; font-weight: bold; margin-top: 4px; display: block; }
           .late { color: #dc2626; }
           .ontime { color: #16a34a; }
-          .status { padding: 4px 8px; border-radius: 12px; background: #f3f4f6; display: inline-block; font-size: 10px;}
         </style>
       </head>
       <body>
@@ -225,7 +224,11 @@ export default function App() {
         const serverDate = new Date(fastestResponse.dateTime || fastestResponse.datetime);
         setSyncRefs({ server: serverDate.getTime(), perf: performance.now() });
         setIsTimeSynced(true); setTimeAnomaly(false);
-      } catch (err) { setTimeout(syncTime, 10000); }
+      } catch (err) { 
+        // Fallback ke waktu lokal jika API gagal (mencegah pegawai tidak bisa absen karena masalah jaringan/CORS)
+        setSyncRefs({ server: Date.now(), perf: performance.now() });
+        setIsTimeSynced(true); setTimeAnomaly(false);
+      }
     };
     syncTime(); const resyncInterval = setInterval(syncTime, 1800000);
     return () => clearInterval(resyncInterval);
@@ -264,7 +267,26 @@ export default function App() {
 
   useEffect(() => {
     if (!firebaseUser) return;
-    const unsubPegawai = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'pegawai'), (snap) => setPegawaiList(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    const seedPegawai = async () => {
+      try {
+        const pegawaiRef = collection(db, 'artifacts', appId, 'public', 'data', 'pegawai');
+        const snap = await getDocs(pegawaiRef);
+        if (snap.empty) {
+          await addDoc(pegawaiRef, { nama: "BUDI SANTOSO", nip: "198503122010011001", bidang: "Tata Usaha", jabatan: "STAF UMUM", isAdmin: false, bypassGps: false, isMuted: false });
+          await addDoc(pegawaiRef, { nama: "SITI AMINAH", nip: "199007252015042002", bidang: "KPLP", jabatan: "KOMANDAN JAGA", isAdmin: false, bypassGps: false, isMuted: false });
+        }
+      } catch (error) {
+        console.error("Gagal menambahkan pegawai random:", error);
+      }
+    };
+    seedPegawai();
+  }, [firebaseUser]);
+
+  useEffect(() => {
+    if (!firebaseUser) return;
+    const unsubPegawai = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'pegawai'), (snap) => {
+      setPegawaiList(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
     const unsubCreds = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'credentials'), (snap) => setCredentials(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     const unsubAbsen = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'absensi'), (snap) => setAllHistory(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => b.timestamp - a.timestamp)));
     const unsubPengumuman = onSnapshot(collection(db, 'artifacts', appId, 'public', 'data', 'pengumuman'), (snap) => { if (!snap.empty) setPengumumanData({ id: snap.docs[0].id, text: snap.docs[0].data().text }); });
@@ -333,22 +355,31 @@ export default function App() {
 }
 
 // ==========================================
-// HALAMAN LOGIN & LUPA PASSWORD
+// HAL halaman Login & LUPA PASSWORD
 // ==========================================
 function LoginPage({ onLogin, credentials, pegawaiList, isDarkMode, toggleDarkMode, showToast, db, appId }) {
   const [nip, setNip] = useState(''); const [pass, setPass] = useState(''); const [showPassword, setShowPassword] = useState(false); const [showForgotModal, setShowForgotModal] = useState(false);
 
   const handleSubmit = (e) => {
-    e.preventDefault(); if (!nip || !pass) return showToast("Harap isi NIP dan Password", "error");
-    if (nip === '2001' && pass === 'november') return onLogin({ username: 'Admin Lapas', role: 'admin', rawUsername: '2001' });
+    e.preventDefault(); 
+    if (!nip || !pass) return showToast("Harap isi NIP dan Password", "error");
+    
+    const cleanNip = nip; 
+    const cleanPass = pass;
 
-    const cred = credentials.find(c => c.username === nip);
+    if (cleanNip === '2001' && cleanPass === 'november') {
+      return onLogin({ username: 'Admin Lapas', role: 'admin', rawUsername: '2001', isMainAdmin: true });
+    }
+
+    const cred = credentials.find(c => c.username === cleanNip);
     const expectedPass = cred?.password || '123456'; 
-    if (pass === expectedPass) {
-      const peg = pegawaiList.find(p => p.nip === nip);
-      if (peg) onLogin({ username: peg.nama, role: 'pegawai', rawUsername: nip });
+    if (cleanPass === expectedPass) {
+      const peg = pegawaiList.find(p => p.nip === cleanNip);
+      if (peg) onLogin({ username: peg.nama, role: peg.isAdmin ? 'admin' : 'pegawai', rawUsername: cleanNip });
       else showToast("NIP tidak terdaftar dalam sistem", "error");
-    } else showToast("NIP atau Password salah", "error");
+    } else {
+      showToast("NIP atau Password salah", "error");
+    }
   };
 
   return (
@@ -394,10 +425,13 @@ function ForgotPasswordModal({ db, appId, onClose, showToast, pegawaiList }) {
   const [nipReq, setNipReq] = useState(''); const [loading, setLoading] = useState(false);
   const handleSubmit = async (e) => {
     e.preventDefault(); if (!nipReq) return showToast("Masukkan NIP Anda", "error");
-    const peg = pegawaiList.find(p => p.nip === nipReq); if (!peg) return showToast("NIP tidak ditemukan di database", "error");
+    const cleanNipReq = nipReq;
+    const peg = pegawaiList.find(p => p.nip === cleanNipReq); 
+    if (!peg) return showToast("NIP tidak ditemukan di database", "error");
+    
     setLoading(true);
     try {
-      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'password_requests'), { nip: nipReq, nama: peg.nama, timestamp: Date.now() });
+      await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'password_requests'), { nip: cleanNipReq, nama: peg.nama, timestamp: Date.now() });
       showToast("Permintaan reset sandi berhasil dikirim ke Admin!"); onClose();
     } catch (err) { showToast("Gagal mengirim permintaan", "error"); } finally { setLoading(false); }
   };
@@ -525,7 +559,7 @@ function MainDashboard({ currentUser, pegawaiList, allHistory, credentials, loca
             {activeTab === 'riwayat' && <HistoryList history={currentUser.role === 'admin' ? allHistory : allHistory.filter(h => h.username === currentUser.rawUsername)} currentUser={currentUser} locationConfig={locationConfig} db={db} appId={appId} showToast={showToast} />}
             {activeTab === 'rekap' && <RekapView currentUser={currentUser} allHistory={allHistory} pegawaiList={pegawaiList} waConfig={waConfig} setWaConfig={(cfg) => { setWaConfig(cfg); localStorage.setItem('waAutoConfig', JSON.stringify(cfg)); showToast("Pengaturan WA Laporan Otomatis Tersimpan!"); }} showToast={showToast} db={db} appId={appId} />}
             {activeTab === 'analitik' && <AnalitikView allHistory={allHistory} pegawaiList={pegawaiList} />}
-            {activeTab === 'kelola' && <KelolaView pegawaiList={pegawaiList} passRequests={passRequests} locationConfig={locationConfig} showToast={showToast} db={db} appId={appId} credentials={credentials} />}
+            {activeTab === 'kelola' && <KelolaView currentUser={currentUser} pegawaiList={pegawaiList} passRequests={passRequests} locationConfig={locationConfig} showToast={showToast} db={db} appId={appId} credentials={credentials} />}
             {activeTab === 'pesan' && <PesanView currentUser={currentUser} messages={messages} pegawaiList={pegawaiList} db={db} appId={appId} showToast={showToast} />}
           </div>
         </div>
@@ -559,6 +593,17 @@ function MainDashboard({ currentUser, pegawaiList, allHistory, credentials, loca
       {showWAAlert && currentUser.role === 'admin' && (
         <AutoWAAlert onClose={() => setShowWAAlert(false)} onSend={() => { const d = formatDateIndo(currentTime); localStorage.setItem('lastWADate', d); setLastWADate(d); setShowWAAlert(false); }} waConfig={waConfig} allHistory={allHistory} pegawaiList={pegawaiList} currentTime={currentTime} />
       )}
+    </div>
+  );
+}
+
+function ConfirmModal({ title, message, onConfirm, onCancel, confirmText = "Ya, Lanjutkan", cancelText = "Batal", isDanger = false }) {
+  return (
+    <div className="fixed inset-0 z-[500] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-sm animate-in fade-in">
+      <div className="glass-card p-8 rounded-[2rem] max-w-sm w-full border border-white/10 shadow-2xl animate-in zoom-in-95">
+        <h3 className={`text-lg font-black mb-2 ${isDanger ? 'text-rose-500' : 'text-blue-500'}`}>{title}</h3><p className="text-xs font-bold text-slate-400 mb-8 whitespace-pre-wrap leading-relaxed">{message}</p>
+        <div className="flex gap-3"><button onClick={onCancel} className="flex-1 py-3 bg-slate-800 text-slate-300 rounded-xl font-black uppercase text-[10px] hover:bg-slate-700">{cancelText}</button><button onClick={onConfirm} className={`flex-1 py-3 text-white rounded-xl font-black uppercase text-[10px] btn-3d ${isDanger ? 'bg-rose-600' : 'bg-blue-600'}`}>{confirmText}</button></div>
+      </div>
     </div>
   );
 }
@@ -602,8 +647,8 @@ function AbsenView({ currentUser, currentTime, allHistory, pegawaiList, location
   const [livenessStatus, setLivenessStatus] = useState('');
   const [isFakeGpsBlocked, setIsFakeGpsBlocked] = useState(false);
 
-  // States for Personal Rekapitulasi
-  const [rekapTabType, setRekapTabType] = useState('mingguan');
+  // States for Personal Rekapitulasi - Defaults to 'harian' (Hari Ini)
+  const [rekapTabType, setRekapTabType] = useState('harian');
   const [rekapStartDate, setRekapStartDate] = useState('');
   const [rekapEndDate, setRekapEndDate] = useState('');
   const [rekapFilterStatus, setRekapFilterStatus] = useState('Semua');
@@ -649,7 +694,8 @@ function AbsenView({ currentUser, currentTime, allHistory, pegawaiList, location
       }
       const motionPercent = (diffCount / (frame1.length / 4)) * 100;
 
-      if (motionPercent < 0.5) { 
+      // Toleransi gerakan dikurangi agar tidak sering gagal jika tangan stabil
+      if (motionPercent < 0.05) { 
         setIsScanning(false); setLivenessStatus('');
         showToast("Liveness Gagal: Terdeteksi foto statis! Silakan ulangi & gerakkan wajah.", "error");
       } else {
@@ -693,14 +739,16 @@ function AbsenView({ currentUser, currentTime, allHistory, pegawaiList, location
         if (fakeGpsDetected) {
           setIsFakeGpsBlocked(true);
           showToast("Indikasi Fake GPS! Pergerakan tidak wajar (>10 KM / Menit) diblokir.", "error");
-          return;
+        } else {
+          setIsFakeGpsBlocked(false);
         }
 
+        // Tetap catat lokasi agar sistem bisa pulih secara otomatis dari False Positive GPS loncat
         locationHistoryRef.current.push({lat: latitude, lng: longitude, time: now});
-        setIsFakeGpsBlocked(false);
 
-        if (accuracy > 100) { showToast(`Sinyal lemah (Akurasi ${Math.round(accuracy)}m). Tunggu sebentar atau cari tempat terbuka...`, "error"); return; }
-        setLocation({ lat: latitude, lng: longitude }); setDist(getDistanceInKm(latitude, longitude, locationConfig.lat, locationConfig.lng));
+        // Toleransi akurasi diperbesar agar pegawai yang di dalam ruangan tetap bisa mengunci GPS
+        if (accuracy > 2000) { showToast(`Sinyal lemah (Akurasi ${Math.round(accuracy)}m). Tunggu sebentar atau cari tempat terbuka...`, "error"); return; }
+        setLocation({ lat: latitude, longitude }); setDist(getDistanceInKm(latitude, longitude, locationConfig.lat, locationConfig.lng));
       },
       (err) => { 
         if (err.code === err.PERMISSION_DENIED) showToast("Izin GPS ditolak oleh browser Anda!", "error");
@@ -714,19 +762,36 @@ function AbsenView({ currentUser, currentTime, allHistory, pegawaiList, location
 
   const submitAbsenClick = () => {
     if (!auth.currentUser) return showToast("Sesi habis, harap login ulang", "error");
-    if (!isSynced) return showToast("Waktu perangkat tidak valid", "error");
-    if (!canBypassGps && isFakeGpsBlocked) return showToast("Sistem mendeteksi penggunaan Fake GPS. Absen diblokir!", "error");
-    if (!canBypassGps && currentTime.getDay() === 0) return showToast("Sistem menolak: Hari Minggu tidak ada jadwal absensi.", "error");
+    
+    // Wajib untuk Pegawai (Selain Admin / Non-bypass)
+    if (!canBypassGps) {
+      if (!photo) return showToast("Harap ambil verifikasi foto wajah terlebih dahulu!", "error");
+      if (!isSynced) return showToast("Menunggu sinkronisasi waktu server...", "error");
+      if (isFakeGpsBlocked) return showToast("Sistem mendeteksi penggunaan Fake GPS. Absen diblokir!", "error");
+      if (currentTime.getDay() === 0) return showToast("Sistem menolak: Hari Minggu tidak ada jadwal absensi.", "error");
+      
+      // Validasi Wajib Absen Masuk sebelum Keluar
+      if (absenType === 'Keluar') {
+        const todayStr = formatDateIndo(currentTime);
+        const hasMasuk = allHistory.some(h => h.username === currentUser.rawUsername && h.dateStr === todayStr && h.type === 'Masuk');
+        if (!hasMasuk) return showToast("DITOLAK! Anda wajib melakukan Absen Masuk terlebih dahulu hari ini.", "error");
+      }
+    }
 
-    if (['Masuk', 'Keluar'].includes(absenType)) {
+    const isPhysicalAbsen = ['Masuk', 'Keluar'].includes(absenType);
+
+    if (isPhysicalAbsen) {
       if (!canBypassGps && !location) return showToast("Harap mulai Lacak GPS terlebih dahulu!", "error");
       if (!canBypassGps && dist > (locationConfig.radius / 1000)) {
         return showToast(`DITOLAK! Anda berada ${(dist * 1000).toFixed(0)} meter dari Lapas Kalabahi. Jarak maksimal adalah ${locationConfig.radius} meter.`, "error");
       }
     }
 
-    if (!canBypassGps && !location) setConfirmDialog({ title: "PERINGATAN GPS", message: "Sinyal GPS Anda belum terkunci atau menggunakan simulasi.\nAnda akan melakukan absensi TANPA verifikasi titik koordinat asli.\n\nTetap Lanjutkan?", isDanger: true, onConfirm: () => { setConfirmDialog(null); executeSubmit(); } });
-    else setConfirmDialog({ title: "KONFIRMASI ABSENSI", message: `Apakah Anda yakin ingin mengirim laporan [${absenType}] sekarang?`, onConfirm: () => { setConfirmDialog(null); executeSubmit(); } });
+    if (!canBypassGps && !location && !isPhysicalAbsen) {
+      setConfirmDialog({ title: "PERINGATAN GPS", message: `Sinyal GPS Anda belum terkunci.\nAnda akan mengirim laporan [${absenType}] TANPA verifikasi titik koordinat asli.\n\nTetap Lanjutkan?`, isDanger: true, onConfirm: () => { setConfirmDialog(null); executeSubmit(); } });
+    } else {
+      setConfirmDialog({ title: "KONFIRMASI ABSENSI", message: `Apakah Anda yakin ingin mengirim laporan [${absenType}] sekarang?\nData akan tercatat permanen di sistem.`, onConfirm: () => { setConfirmDialog(null); executeSubmit(); } });
+    }
   };
 
   const executeSubmit = async () => {
@@ -752,7 +817,7 @@ function AbsenView({ currentUser, currentTime, allHistory, pegawaiList, location
     try {
       const data = {
         username: currentUser.rawUsername, displayName: currentUser.username, type: absenType,
-        timestamp: currentTime.getTime(), dateStr: formatDateIndo(currentTime), timeStr: formatWITA(currentTime).substring(0, 5), photoStr: photo,
+        timestamp: currentTime.getTime(), dateStr: formatDateIndo(currentTime), timeStr: formatWITA(currentTime).substring(0, 5), photoStr: photo || null,
         location: location || { lat: 0, lng: 0, manual: true }, distance: dist || 0,
         deviceVerified: true, isServerSynced: true, antiManipulationEnabled: true, timezone: 'WITA'
       };
@@ -780,7 +845,6 @@ function AbsenView({ currentUser, currentTime, allHistory, pegawaiList, location
 
   const personalLogs = getPersonalLogs();
   
-  // Mengelompokkan log berdasarkan tanggal
   const groupedPersonalLogs = personalLogs.reduce((acc, log) => {
     if (!acc[log.dateStr]) acc[log.dateStr] = { dateStr: log.dateStr, timestamp: log.timestamp, logs: [] };
     acc[log.dateStr].logs.push(log);
@@ -1025,7 +1089,7 @@ function AbsenView({ currentUser, currentTime, allHistory, pegawaiList, location
             <select value={absenType} onChange={e => setAbsenType(e.target.value)} className="w-full md:flex-1 p-4 bg-slate-100 dark:bg-slate-900 border-none rounded-2xl font-black text-xs text-center outline-none cursor-pointer text-slate-950 dark:text-white shadow-inner">
               {['Masuk', 'Keluar', 'Lepas Piket', 'Sakit', 'Cuti', 'Dinas Luar', 'BKO'].map(t => <option key={t} value={t}>{t}</option>)}
             </select>
-            <button disabled={!photo || loading || !isSynced} onClick={submitAbsenClick} className="w-full md:w-auto px-10 py-5 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] btn-3d shadow-xl shadow-blue-600/30 disabled:opacity-30 disabled:scale-100 transition-all active:scale-95">
+            <button disabled={loading} onClick={submitAbsenClick} className={`w-full md:w-auto px-10 py-5 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] btn-3d shadow-xl shadow-blue-600/30 transition-all active:scale-95 ${(!canBypassGps && !photo) || (!canBypassGps && !isSynced) ? 'opacity-70' : 'opacity-100'}`}>
               {loading ? <Loader2 className="animate-spin mx-auto" size={18}/> : `Lapor ${absenType}`}
             </button>
           </div>
@@ -1131,11 +1195,11 @@ function AbsenView({ currentUser, currentTime, allHistory, pegawaiList, location
                  )}
               </tbody>
            </table>
+          </div>
         </div>
+        {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
       </div>
-      {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
-    </div>
-  );
+    );
 }
 
 // ==========================================
@@ -1147,11 +1211,46 @@ function HistoryList({ history, currentUser, locationConfig, db, appId, showToas
   const [confirmDialog, setConfirmDialog] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedIds, setSelectedIds] = useState([]);
+  const [filterType, setFilterType] = useState('Semua');
+  const [filterStartDate, setFilterStartDate] = useState('');
+  const [filterEndDate, setFilterEndDate] = useState('');
 
-  const filteredHistory = history.filter(item => 
-    item.displayName?.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    item.username?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredHistory = history.filter(item => {
+    const cleanSearchTerm = searchTerm.trim().toLowerCase(); 
+    const matchSearch = item.displayName?.toLowerCase().includes(cleanSearchTerm) || 
+                        item.username?.toLowerCase().includes(cleanSearchTerm);
+    
+    let matchDate = true;
+    const now = Date.now();
+    
+    if (filterType === 'Harian') {
+      const start = new Date().setHours(0, 0, 0, 0);
+      matchDate = item.timestamp >= start;
+    } else if (filterType === 'Mingguan') {
+      const start = now - (7 * 24 * 60 * 60 * 1000);
+      matchDate = item.timestamp >= start;
+    } else if (filterType === 'Bulanan') {
+      const start = now - (30 * 24 * 60 * 60 * 1000);
+      matchDate = item.timestamp >= start;
+    } else if (filterType === 'Triwulan') {
+      const start = now - (90 * 24 * 60 * 60 * 1000);
+      matchDate = item.timestamp >= start;
+    } else if (filterType === 'Custom') {
+      if (filterStartDate && filterEndDate) {
+        const start = new Date(filterStartDate).setHours(0, 0, 0, 0);
+        const end = new Date(filterEndDate).setHours(23, 59, 59, 999);
+        matchDate = item.timestamp >= start && item.timestamp <= end;
+      } else if (filterStartDate) {
+        const start = new Date(filterStartDate).setHours(0, 0, 0, 0);
+        matchDate = item.timestamp >= start;
+      } else if (filterEndDate) {
+        const end = new Date(filterEndDate).setHours(23, 59, 59, 999);
+        matchDate = item.timestamp <= end;
+      }
+    }
+
+    return matchSearch && matchDate;
+  });
 
   const displayHistory = currentUser.role === 'admin' ? filteredHistory.slice(0, 100) : filteredHistory.slice(0, 20);
 
@@ -1207,14 +1306,37 @@ function HistoryList({ history, currentUser, locationConfig, db, appId, showToas
     <div className="space-y-4">
       {currentUser.role === 'admin' && ( <div className="p-4 bg-amber-100 dark:bg-amber-900/30 rounded-2xl flex items-center gap-3 mb-6"><AlertTriangle size={20} className="text-amber-600 shrink-0" /><p className="text-[10px] font-bold text-amber-800 uppercase tracking-widest">Akses Admin: Fitur Pengeditan & Pembatalan Aktif</p></div> )}
       
-      <div className="flex flex-col md:flex-row gap-4 mb-4 justify-between items-center">
-        <div className="relative w-full md:w-1/2">
-          <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-          <input type="text" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Cari Nama atau NIP Pegawai..." className="w-full pl-10 pr-4 py-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-bold shadow-sm focus:border-blue-500 outline-none transition-colors" />
+      <div className="flex flex-col xl:flex-row gap-4 mb-4 justify-between items-start xl:items-center">
+        <div className="flex flex-col md:flex-row gap-4 w-full xl:w-auto flex-1">
+          <div className="relative w-full md:w-1/2 xl:w-80">
+            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+            <input type="text" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Cari Nama atau NIP Pegawai..." className="w-full pl-10 pr-4 py-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-bold shadow-sm focus:border-blue-500 outline-none transition-colors" />
+          </div>
+          
+          <div className="flex flex-wrap items-center gap-2 w-full md:w-auto">
+             <div className="relative w-full md:w-auto">
+                <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                <select value={filterType} onChange={e => setFilterType(e.target.value)} className="w-full md:w-auto pl-9 pr-8 py-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-sm focus:border-blue-500 outline-none transition-colors appearance-none cursor-pointer text-slate-700 dark:text-slate-300">
+                   <option value="Semua">Semua Waktu</option>
+                   <option value="Harian">Hari Ini</option>
+                   <option value="Mingguan">7 Hari</option>
+                   <option value="Bulanan">30 Hari</option>
+                   <option value="Triwulan">90 Hari</option>
+                   <option value="Custom">Pilih Manual</option>
+                </select>
+             </div>
+             {filterType === 'Custom' && (
+               <div className="flex items-center gap-2 w-full md:w-auto mt-2 md:mt-0">
+                 <input type="date" value={filterStartDate} onChange={e => setFilterStartDate(e.target.value)} className="w-full md:w-auto px-4 py-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-[10px] font-bold uppercase shadow-sm focus:border-blue-500 outline-none transition-colors dark:[color-scheme:dark]" title="Tanggal Mulai" />
+                 <span className="text-xs font-bold text-slate-500">-</span>
+                 <input type="date" value={filterEndDate} onChange={e => setFilterEndDate(e.target.value)} min={filterStartDate} className="w-full md:w-auto px-4 py-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-[10px] font-bold uppercase shadow-sm focus:border-blue-500 outline-none transition-colors dark:[color-scheme:dark]" title="Tanggal Berakhir" />
+               </div>
+             )}
+          </div>
         </div>
         
         {currentUser.role === 'admin' && displayHistory.length > 0 && (
-          <div className="flex items-center gap-4 w-full md:w-auto p-3 bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800">
+          <div className="flex items-center gap-4 w-full xl:w-auto p-3 bg-white dark:bg-slate-900 rounded-xl shadow-sm border border-slate-200 dark:border-slate-800">
             <label className="flex items-center gap-2 cursor-pointer">
               <input type="checkbox" onChange={handleSelectAll} checked={selectedIds.length === displayHistory.length && displayHistory.length > 0} className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500" />
               <span className="text-[10px] font-black uppercase text-slate-600 dark:text-slate-400">Pilih Semua</span>
@@ -1377,7 +1499,8 @@ function RekapView({ currentUser, allHistory, pegawaiList, waConfig, setWaConfig
             const status = row.Status || row.status || row.Keterangan || row.keterangan || 'Masuk';
             
             if (nip && tanggal && waktu) {
-                const peg = pegawaiList.find(p => p.nip === String(nip).trim());
+                const cleanNip = String(nip);
+                const peg = pegawaiList.find(p => p.nip === cleanNip);
                 if(peg) {
                     const targetDate = new Date(tanggal);
                     const [h, m] = String(waktu).replace(/\./g, ':').split(':').map(Number);
@@ -1752,7 +1875,8 @@ function RekapView({ currentUser, allHistory, pegawaiList, waConfig, setWaConfig
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {bidangs.map(bidang => {
-                const pList = pegawaiList.filter(p => p.bidang === bidang && (p.nama.toLowerCase().includes(searchTerm.toLowerCase()) || p.nip.toLowerCase().includes(searchTerm.toLowerCase())));
+                const cleanSearchTerm = searchTerm.trim().toLowerCase();
+                const pList = pegawaiList.filter(p => p.bidang === bidang && (p.nama.toLowerCase().includes(cleanSearchTerm) || p.nip.toLowerCase().includes(cleanSearchTerm)));
                 
                 const filteredPList = pList.filter(p => {
                     if (filterStatus === 'Semua') return true;
@@ -1831,7 +1955,7 @@ function RekapView({ currentUser, allHistory, pegawaiList, waConfig, setWaConfig
 
 function WASettingsModal({ waConfig, setWaConfig, onClose }) {
   const [phone, setPhone] = useState(waConfig.phone); const [time, setTime] = useState(waConfig.time); const [enabled, setEnabled] = useState(waConfig.enabled);
-  const handleSave = (e) => { e.preventDefault(); setWaConfig({ phone, time, enabled }); onClose(); };
+  const handleSave = (e) => { e.preventDefault(); setWaConfig({ phone: phone.trim(), time, enabled }); onClose(); };
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md">
       <div className="glass-card p-10 rounded-[3rem] max-w-sm w-full border border-white/10 shadow-2xl animate-in zoom-in">
@@ -1997,6 +2121,7 @@ function PesanView({ currentUser, messages, pegawaiList, db, appId, showToast })
   const [msgText, setMsgText] = useState('');
   const [loading, setLoading] = useState(false);
   const [confirmDialog, setConfirmDialog] = useState(null);
+  const [selectedMessageIds, setSelectedMessageIds] = useState([]);
 
   const displayMessages = currentUser.role === 'admin' 
     ? messages 
@@ -2045,6 +2170,32 @@ function PesanView({ currentUser, messages, pegawaiList, db, appId, showToast })
     }});
   };
 
+  const handleSelectAllMessages = (e) => {
+    if (e.target.checked) setSelectedMessageIds(displayMessages.map(m => m.id));
+    else setSelectedMessageIds([]);
+  };
+
+  const toggleSelectMessage = (id, isChecked) => {
+    if (isChecked) setSelectedMessageIds(prev => [...prev, id]);
+    else setSelectedMessageIds(prev => prev.filter(i => i !== id));
+  };
+
+  const handleBulkDeleteMessages = () => {
+    if (selectedMessageIds.length === 0) return;
+    setConfirmDialog({ title: "Hapus Pesan Massal", message: `Yakin menghapus ${selectedMessageIds.length} pesan yang dipilih secara permanen?`, isDanger: true, onConfirm: async () => {
+      setConfirmDialog(null);
+      try {
+        const batch = writeBatch(db);
+        selectedMessageIds.forEach(id => {
+          batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'pesan', id));
+        });
+        await batch.commit();
+        showToast(`${selectedMessageIds.length} pesan berhasil dihapus!`);
+        setSelectedMessageIds([]);
+      } catch(e) { showToast("Gagal menghapus pesan", "error"); }
+    }});
+  };
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-3 gap-8 items-start">
       <div className="md:col-span-1 space-y-6">
@@ -2077,13 +2228,29 @@ function PesanView({ currentUser, messages, pegawaiList, db, appId, showToast })
       </div>
 
       <div className="md:col-span-2 glass-card p-6 md:p-8 rounded-[3rem] shadow-xl min-h-[500px] flex flex-col">
-        <h3 className="text-xl font-black flex items-center gap-3 mb-6"><Mail size={24} className="text-blue-600"/> Kotak Masuk / Percakapan</h3>
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-6">
+          <h3 className="text-xl font-black flex items-center gap-3"><Mail size={24} className="text-blue-600"/> Kotak Masuk / Percakapan</h3>
+          {displayMessages.length > 0 && (
+            <div className="flex items-center gap-3 bg-white/50 dark:bg-slate-900/50 p-2 rounded-xl border border-slate-200 dark:border-slate-800">
+              <label className="flex items-center gap-2 cursor-pointer px-2">
+                <input type="checkbox" onChange={handleSelectAllMessages} checked={selectedMessageIds.length === displayMessages.length && displayMessages.length > 0} className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer" />
+                <span className="text-[10px] font-black uppercase text-slate-600 dark:text-slate-400">Pilih Semua</span>
+              </label>
+              {selectedMessageIds.length > 0 && (
+                <button onClick={handleBulkDeleteMessages} className="px-3 py-1.5 bg-rose-600 text-white rounded-lg text-[9px] font-black uppercase shadow-md flex items-center gap-1 hover:bg-rose-700 transition-colors"><Trash2 size={12}/> Hapus ({selectedMessageIds.length})</button>
+              )}
+            </div>
+          )}
+        </div>
         <div className="flex-1 overflow-y-auto space-y-4 pr-2">
           {displayMessages.length === 0 ? <p className="text-center text-[10px] font-black uppercase tracking-widest text-slate-400 mt-20">Belum ada pesan</p> : 
            displayMessages.map(m => (
-            <div key={m.id} className={`p-5 rounded-2xl relative group ${m.senderNip === currentUser.rawUsername ? 'bg-blue-50 dark:bg-blue-900/20 ml-12 border border-blue-100 dark:border-blue-800/50' : 'bg-slate-100 dark:bg-slate-800 mr-12 border border-slate-200 dark:border-slate-700/50'}`}>
+            <div key={m.id} className={`p-5 rounded-2xl relative group ${m.senderNip === currentUser.rawUsername ? 'bg-blue-50 dark:bg-blue-900/20 ml-12 border border-blue-100 dark:border-blue-800/50' : 'bg-slate-100 dark:bg-slate-800 mr-12 border border-slate-200 dark:border-slate-700/50'} ${selectedMessageIds.includes(m.id) ? 'ring-2 ring-emerald-500 shadow-md' : ''}`}>
               <div className="flex justify-between items-start mb-2">
-                <p className={`text-[10px] font-black uppercase tracking-widest ${m.senderNip === currentUser.rawUsername ? 'text-blue-600' : 'text-slate-600 dark:text-slate-400'}`}>{m.senderNip === currentUser.rawUsername ? 'Dari Saya' : `Dari: ${m.senderName}`}</p>
+                <div className="flex items-center gap-3">
+                  <input type="checkbox" checked={selectedMessageIds.includes(m.id)} onChange={(e) => toggleSelectMessage(m.id, e.target.checked)} className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer" />
+                  <p className={`text-[10px] font-black uppercase tracking-widest ${m.senderNip === currentUser.rawUsername ? 'text-blue-600' : 'text-slate-600 dark:text-slate-400'}`}>{m.senderNip === currentUser.rawUsername ? 'Dari Saya' : `Dari: ${m.senderName}`}</p>
+                </div>
                 <div className="flex gap-2 items-center">
                   <p className="text-[8px] font-bold text-slate-400">{formatDateIndo(new Date(m.timestamp))} {formatWITA(new Date(m.timestamp))}</p>
                   {(currentUser.role === 'admin' || m.senderNip === currentUser.rawUsername || m.receiverNip === currentUser.rawUsername) && (
@@ -2091,8 +2258,8 @@ function PesanView({ currentUser, messages, pegawaiList, db, appId, showToast })
                   )}
                 </div>
               </div>
-              <p className="text-sm font-bold text-slate-800 dark:text-slate-200 leading-relaxed whitespace-pre-wrap">{m.message}</p>
-              {currentUser.role === 'admin' && m.receiverNip !== 'admin' && <p className="text-[8px] font-black uppercase text-amber-500 mt-3 border-t border-amber-500/20 pt-2 w-fit">Ditujukan untuk: {m.receiverName}</p>}
+              <p className="text-sm font-bold text-slate-800 dark:text-slate-200 leading-relaxed whitespace-pre-wrap pl-7">{m.message}</p>
+              {currentUser.role === 'admin' && m.receiverNip !== 'admin' && <p className="text-[8px] font-black uppercase text-amber-500 mt-3 border-t border-amber-500/20 pt-2 w-fit ml-7">Ditujukan untuk: {m.receiverName}</p>}
             </div>
           ))}
         </div>
@@ -2103,18 +2270,21 @@ function PesanView({ currentUser, messages, pegawaiList, db, appId, showToast })
 }
 
 // ==========================================
-// VIEW: KELOLA PEGAWAI & LUPA PASSWORD
+// VIEW: KELOLA PEGAWAI & PENGATURAN ADMIN
 // ==========================================
-function KelolaView({ pegawaiList, passRequests, locationConfig, showToast, db, appId, credentials }) {
-  const [loading, setLoading] = useState(false); const [previewData, setPreviewData] = useState(null);
+function KelolaView({ currentUser, pegawaiList, passRequests, locationConfig, showToast, db, appId, credentials }) {
+  const [loading, setLoading] = useState(false);
   const [targetPassUser, setTargetPassUser] = useState(null); const [showAddModal, setShowAddModal] = useState(false); 
   const [editPegawaiTarget, setEditPegawaiTarget] = useState(null);
-  const [showBulkAbsenModal, setShowBulkAbsenModal] = useState(false);
   const [showLocationModal, setShowLocationModal] = useState(false);
-  const [confirmDialog, setConfirmDialog] = useState(null); const fileInputRef = useRef(null);
+  const [confirmDialog, setConfirmDialog] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [filterBidang, setFilterBidang] = useState('Semua');
   const [selectedPegawaiIds, setSelectedPegawaiIds] = useState([]);
+  const [manualAbsenTarget, setManualAbsenTarget] = useState(null);
+  
+  const [isImportingPegawai, setIsImportingPegawai] = useState(false);
+  const importPegawaiRef = useRef(null);
 
   const bidangs = ["KALAPAS", "Tata Usaha", "KPLP", "Adm Kamtib", "Binadikgiatja"];
 
@@ -2125,534 +2295,558 @@ function KelolaView({ pegawaiList, passRequests, locationConfig, showToast, db, 
     } catch (e) { showToast("Gagal mengubah status GPS", "error"); }
   };
 
-  const dataAwal = [
-    { nip: "198007232000121001", nama: "M Arfandy, A.Md. IP., S.H., M.H.", bidang: "KALAPAS", jabatan: "Kepala Lembaga Pemasyarakatan" },
-    { nip: "198507302009011003", nama: "ABDURRAHMAN HARYONO, S.H.", bidang: "Tata Usaha", jabatan: "KEPALA SUBBAGIAN TATA USAHA" },
-    { nip: "196810191992032001", nama: "OKTOVIYANA LILIYANI LOURU JAGI", bidang: "Tata Usaha", jabatan: "KAUR KEPEGAWAIAN DAN KEUANGAN" },
-    { nip: "199006102009011001", nama: "ASRIYADI LAGANI, S.H.", bidang: "Tata Usaha", jabatan: "KEPALA URUSAN UMUM" },
-    { nip: "199007082009121003", nama: "DANIEL ROBERTO ANIE", bidang: "Tata Usaha", jabatan: "PENGELOLA DATA KEPEGAWAIAN" },
-    { nip: "199004212012121001", nama: "ANTONIUS SOEHONO PURWANTO", bidang: "Tata Usaha", jabatan: "OPERATOR MESIN" },
-    { nip: "199710102017121001", nama: "RIVALDO FITHOREZA OLANG, S.Sos", bidang: "Tata Usaha", jabatan: "BENDAHARA PENGELUARAN" },
-    { nip: "199804222017122002", nama: "MISYIE AMELIA MABILEHI", bidang: "Tata Usaha", jabatan: "PENGHUBUNG ADMINISTRASI" },
-    { nip: "199806082020121001", nama: "TRIVAN DANIEL LOMI", bidang: "Tata Usaha", jabatan: "STAF KEPEGAWAIAN" },
-    { nip: "200208312022031001", nama: "IRFAN ALFIAN JAE", bidang: "Tata Usaha", jabatan: "STAF KEUANGAN" },
-    { nip: "200108022022031001", nama: "ABYESTIANUS TLOIM", bidang: "Tata Usaha", jabatan: "STAF KEUANGAN" },
-    { nip: "200111122022031001", nama: "DWI FATUR RAHMAN WIJAYA", bidang: "Tata Usaha", jabatan: "STAF UMUM" },
-    { nip: "200203102022031001", nama: "YEFONA SIMSON L. PRABILA", bidang: "Tata Usaha", jabatan: "STAF UMUM" },
-    { nip: "199904072025062011", nama: "DINA TIMUTANG", bidang: "Tata Usaha", jabatan: "STAF UMUM" },
-    { nip: "197610241997031001", nama: "ROBY EDUARD THERIK, S.H.", bidang: "KPLP", jabatan: "KEPALA KPLP" },
-    { nip: "198503042009011004", nama: "MUHAMAD LUKMAN HINALEDE", bidang: "KPLP", jabatan: "STAF KPLP" },
-    { nip: "199102252017121003", nama: "MUKHLIS YUSUF MARO", bidang: "KPLP", jabatan: "STAF KPLP" },
-    { nip: "200303242022031001", nama: "MUHAIMIN ABDUL AZIS", bidang: "KPLP", jabatan: "STAF KPLP" },
-    { nip: "200207112025021001", nama: "GELORA KURNIAWAN, S.Tr.Pas.", bidang: "KPLP", jabatan: "PEMBINA KEAMANAN PEMASYARAKATAN" },
-    { nip: "198602112007031001", nama: "ARNOLDUS ENGE, S.H.", bidang: "Adm Kamtib", jabatan: "KASI ADMINISTRASI KAMTIB" },
-    { nip: "196804261991031002", nama: "DAVID HABIL OBED LOA", bidang: "Adm Kamtib", jabatan: "KASUBSI PELAPORAN DAN TATA TERTIB" },
-    { nip: "198603032009011007", nama: "MARTHEN SONOPAA", bidang: "Adm Kamtib", jabatan: "KEPALA SUBSEKSI KEAMANAN" },
-    { nip: "199807072017121002", nama: "MAULUDIN HAMZAH, Sos.", bidang: "Adm Kamtib", jabatan: "PENGADMINISTRASI PERLENGKAPAN" },
-    { nip: "199910132022031003", nama: "OPNY ANDOARDO SINAWENI", bidang: "Adm Kamtib", jabatan: "STAF KAMTIB" },
-    { nip: "198509252008011001", nama: "SURYANTO AHMAD, S.Sos.", bidang: "Binadikgiatja", jabatan: "KASI BINADIK DAN GIATJA" },
-    { nip: "196804131992031001", nama: "SEPRENI APRIANUS MALOTE, S.Sos.", bidang: "Binadikgiatja", jabatan: "KASUBSI PERAWATAN NAPI/ANAK" },
-    { nip: "196903191991031001", nama: "YOSEF WASI", bidang: "Binadikgiatja", jabatan: "KASUBSI REGISTRASI & BIMKEMAS" },
-    { nip: "198712262009011001", nama: "MOE KRIMANTO MOKA, S.H.", bidang: "Binadikgiatja", jabatan: "KEPALA SUBSEKSI KEGIATAN KERJA" },
-    { nip: "198103082006041001", nama: "MARKUS DEMATRIUS KORANG LAWANG", bidang: "Binadikgiatja", jabatan: "PENGELOLA HASIL KERJA" },
-    { nip: "198510132010121003", nama: "ASYER KOLIMON", bidang: "Binadikgiatja", jabatan: "STAF GIATJA" },
-    { nip: "198610212012121001", nama: "DANANG MAKMUR HADI", bidang: "Binadikgiatja", jabatan: "PENGOLAH DATA SIDIK JARI" },
-    { nip: "199405022012121001", nama: "AHYARDI ARDIMAN BASO", bidang: "Binadikgiatja", jabatan: "STAF REGISTRASI" },
-    { nip: "199302182017121002", nama: "ANDRYAN HENDRICHUS KOLLY", bidang: "Binadikgiatja", jabatan: "PENGELOLA DAN PENGOLAH MAKANAN" },
-    { nip: "199511222017121001", nama: "ROBERT STILMAN BILL ASBANU", bidang: "Binadikgiatja", jabatan: "PENGADMINISTRASI LAYANAN" },
-    { nip: "199812202022031004", nama: "ESA PUTRA NURATIM FOEKH", bidang: "Binadikgiatja", jabatan: "STAF REGISTRASI" },
-    { nip: "200211252025062006", nama: "MARIA HERLINA SASI", bidang: "Binadikgiatja", jabatan: "STAF REGISTRASI" }
-  ];
+  const toggleAdminStatus = (p) => {
+    if (!currentUser.isMainAdmin) return showToast("Hanya Admin Utama yang berhak melantik Admin lain!", "error");
+    setConfirmDialog({
+      title: p.isAdmin ? "Cabut Hak Admin" : "Jadikan Admin",
+      message: `Yakin ingin ${p.isAdmin ? 'mencabut status admin dari' : 'menjadikan'} ${p.nama}${p.isAdmin ? '?' : ' sebagai Admin?'}`,
+      onConfirm: async () => {
+        setConfirmDialog(null); setLoading(true);
+        try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pegawai', p.id), { isAdmin: !p.isAdmin }); showToast(`Status admin ${p.nama} diperbarui!`); } 
+        catch (e) { showToast("Gagal mengubah status", "error"); } finally { setLoading(false); }
+      }
+    });
+  };
 
-  const handleImportExcel = async (e) => {
+  const handleResetPassword = async (nip) => {
+    setLoading(true);
+    try {
+      const cred = credentials.find(c => c.username === nip);
+      if (cred) await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'credentials', cred.id), { password: '123456' });
+      else await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'credentials'), { username: nip, password: '123456' });
+      showToast(`Password untuk NIP ${nip} telah direset ke: 123456`);
+      
+      const req = passRequests.find(r => r.nip === nip);
+      if (req) await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'password_requests', req.id));
+    } catch(e) { showToast("Gagal reset password", "error"); } finally { setLoading(false); }
+  };
+
+  const rejectReset = async (reqId) => {
+    try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'password_requests', reqId)); showToast("Permintaan reset ditolak/dihapus"); } catch(e) {}
+  };
+
+  const deletePegawai = async (id) => {
+    setConfirmDialog({
+      title: "Hapus Pegawai", message: "Yakin menghapus data pegawai ini secara permanen?", isDanger: true,
+      onConfirm: async () => {
+        setConfirmDialog(null); setLoading(true);
+        try { await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pegawai', id)); showToast("Pegawai dihapus!"); } 
+        catch (e) { showToast("Gagal menghapus", "error"); } finally { setLoading(false); }
+      }
+    });
+  };
+
+  const handleSelectAllPegawai = (e) => {
+    if (e.target.checked) setSelectedPegawaiIds(displayPegawai.map(p => p.id));
+    else setSelectedPegawaiIds([]);
+  };
+
+  const toggleSelectPegawai = (id, isChecked) => {
+    if (isChecked) setSelectedPegawaiIds(prev => [...prev, id]);
+    else setSelectedPegawaiIds(prev => prev.filter(i => i !== id));
+  };
+
+  const handleBulkDeletePegawai = () => {
+    if (selectedPegawaiIds.length === 0) return;
+    setConfirmDialog({
+      title: "Hapus Massal Pegawai", message: `Yakin menghapus ${selectedPegawaiIds.length} pegawai yang dipilih secara permanen?`, isDanger: true,
+      onConfirm: async () => {
+        setConfirmDialog(null); setLoading(true);
+        try {
+          const batch = writeBatch(db);
+          selectedPegawaiIds.forEach(id => {
+            batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'pegawai', id));
+          });
+          await batch.commit();
+          showToast(`${selectedPegawaiIds.length} pegawai berhasil dihapus!`);
+          setSelectedPegawaiIds([]);
+        } catch(e) { showToast("Gagal menghapus", "error"); } finally { setLoading(false); }
+      }
+    });
+  };
+
+  // Logika Import/Export Pegawai Excel & Word
+  const handleImportPegawai = async (e) => {
     const file = e.target.files[0]; if (!file) return;
     const ext = file.name.split('.').pop().toLowerCase();
-    
+
     if (ext !== 'xlsx') {
-       showToast("Hanya file Excel format .xlsx yang diizinkan untuk diimpor!", "error");
-       e.target.value = null; 
-       return;
+      showToast("Hanya file Excel format .xlsx yang diizinkan!", "error");
+      e.target.value = null; return;
     }
-    
-    setLoading(true);
-    showToast("Membaca file Excel...");
+
+    setIsImportingPegawai(true);
+    showToast("Memproses data impor...");
     try {
-        const XLSX = await loadXlsxScript();
-        const reader = new FileReader();
-        reader.onload = (event) => {
-            const data = event.target.result;
-            const workbook = XLSX.read(data, { type: 'binary' });
-            const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
-            const parsedData = [];
-            
-            json.forEach(row => {
-                const nip = row.NIP || row.nip;
-                const nama = row.Nama || row.nama;
-                const bidang = row.Bidang || row.bidang || 'Tata Usaha';
-                const jabatan = row.Jabatan || row.jabatan || 'Staf';
-                
-                if (nip && nama) {
-                    parsedData.push({ nip: String(nip).replace(/\s+/g, ''), nama: String(nama), bidang, jabatan });
-                }
-            });
-            
-            if (parsedData.length > 0) setPreviewData(parsedData); 
-            else showToast("Format file kosong atau tidak memiliki kolom NIP dan Nama", "error");
-        };
-        reader.readAsBinaryString(file);
+      const XLSX = await loadXlsxScript();
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        const data = event.target.result;
+        const workbook = XLSX.read(data, { type: 'binary' });
+        const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]]);
+        const batch = writeBatch(db);
+        let count = 0;
+
+        json.forEach(row => {
+            const nip = row.NIP || row.nip || row.Nip;
+            const nama = row.Nama || row.nama || row['Nama Lengkap'] || row['NAMA'];
+            const bidang = row.Bidang || row.bidang || row.BIDANG || 'Tata Usaha';
+            const jabatan = row.Jabatan || row.jabatan || row.JABATAN || 'Staf';
+
+            if (nip && nama) {
+                const docRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'pegawai'));
+                batch.set(docRef, {
+                    nip: String(nip).trim(),
+                    nama: String(nama).toUpperCase(),
+                    bidang: String(bidang),
+                    jabatan: String(jabatan).toUpperCase(),
+                    isAdmin: false,
+                    bypassGps: false,
+                    isMuted: false
+                });
+                count++;
+            }
+        });
+
+        if(count > 0) { await batch.commit(); showToast(`Impor ${count} data pegawai berhasil!`); }
+        else { showToast("Gagal: Pastikan tabel memiliki kolom NIP dan Nama", "error"); }
+      };
+      reader.readAsBinaryString(file);
     } catch(err) { showToast("Gagal membaca file Excel", "error"); }
-    finally { setLoading(false); e.target.value = null; }
+    finally { setIsImportingPegawai(false); e.target.value = null; }
   };
 
-  const handleGenerate = async () => {
-    setLoading(true);
-    try {
-      const batch = writeBatch(db);
-      (previewData || dataAwal).forEach(p => {
-        const cleanNip = p.nip.replace(/\s+/g, '');
-        if (!pegawaiList.some(pl => pl.nip === cleanNip)) { const ref = doc(collection(db, 'artifacts', appId, 'public', 'data', 'pegawai')); batch.set(ref, { ...p, nip: cleanNip }); }
-      });
-      await batch.commit(); showToast("Data Pegawai Berhasil Ditambahkan/Sinkron!");
-    } catch (e) { showToast("Gagal memperbarui data", "error"); } finally { setLoading(false); setPreviewData(null); }
-  };
+  const exportPegawaiToExcel = async () => {
+    if(pegawaiList.length === 0) return showToast("Tidak ada data untuk diekspor", "error");
+    
+    // Format Export disesuaikan agar hanya menampilkan NIP, Nama, Bidang, dan Jabatan
+    const exportData = pegawaiList.map(p => ({
+      "NIP": p.nip,
+      "Nama": p.nama,
+      "Bidang": p.bidang,
+      "Jabatan": p.jabatan
+    }));
 
-  const exportToExcel = async () => {
-    let exportData = pegawaiList.map(p => ({ "NIP": p.nip, "Nama": p.nama, "Bidang": p.bidang, "Jabatan": p.jabatan || '-' }));
     try {
       const XLSX = await loadXlsxScript();
       const ws = XLSX.utils.json_to_sheet(exportData);
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Daftar Pegawai");
-      XLSX.writeFile(wb, `Data_Pegawai_SatuLakal.xlsx`);
+      XLSX.utils.book_append_sheet(wb, ws, "Data Pegawai");
+      XLSX.writeFile(wb, `Data_Pegawai_Lapas_Kalabahi.xlsx`);
       showToast("Berhasil diekspor ke Excel!");
     } catch (e) { showToast("Gagal mengekspor", "error"); }
   };
 
-  const exportToWord = () => {
-    if (pegawaiList.length === 0) return showToast("Tidak ada data", "error");
-    let tableRows = pegawaiList.map(p => `<tr><td style="border: 1px solid black; padding: 5px;">${p.nip}</td><td style="border: 1px solid black; padding: 5px;">${p.nama}</td><td style="border: 1px solid black; padding: 5px;">${p.bidang}</td><td style="border: 1px solid black; padding: 5px;">${p.jabatan || '-'}</td></tr>`).join('');
-    let html = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'><head><meta charset='utf-8'><title>Data Pegawai</title></head><body><h2 style="text-align: center; font-family: sans-serif;">Data Pegawai Lapas Kalabahi</h2><table style="border-collapse: collapse; width: 100%; font-family: sans-serif; font-size: 12px;"><thead><tr><th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">NIP</th><th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">Nama</th><th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">Bidang</th><th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">Jabatan</th></tr></thead><tbody>${tableRows}</tbody></table></body></html>`;
-    const blob = new Blob(['\ufeff', html], { type: 'application/msword' }); const a = document.createElement('a'); a.href = window.URL.createObjectURL(blob); a.download = `Data_Pegawai_SatuLakal.doc`; a.click(); showToast("Diekspor ke Word!");
+  const handlePrintPegawai = () => {
+    if(pegawaiList.length === 0) return showToast("Tidak ada data untuk dicetak", "error");
+    let tableRows = pegawaiList.map((p, idx) => `<tr>
+      <td>${idx + 1}</td>
+      <td>${p.nip}</td>
+      <td style="text-align: left;">${p.nama}</td>
+      <td>${p.bidang}</td>
+      <td>${p.jabatan}</td>
+    </tr>`).join('');
+
+    let html = `<table><thead><tr><th>No</th><th>NIP</th><th>Nama Pegawai</th><th>Bidang</th><th>Jabatan</th></tr></thead><tbody>${tableRows}</tbody></table>`;
+    printHTMLTable("Data Pegawai Lapas Kelas IIB Kalabahi", html);
   };
 
-  const handleResetRequest = async (req) => {
-    try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'credentials', req.nip), { username: req.nip, password: '123456', updatedAt: Date.now() }); await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'password_requests', req.id)); showToast(`Sandi ${req.nama} direset ke 123456!`); } catch (err) { showToast("Gagal mereset", "error"); }
+  const exportPegawaiToWord = () => {
+    if(pegawaiList.length === 0) return showToast("Tidak ada data untuk diekspor", "error");
+    let tableRows = pegawaiList.map((p, idx) => `<tr>
+      <td style="border: 1px solid black; padding: 5px; text-align: center;">${idx + 1}</td>
+      <td style="border: 1px solid black; padding: 5px;">${p.nip}</td>
+      <td style="border: 1px solid black; padding: 5px;">${p.nama}</td>
+      <td style="border: 1px solid black; padding: 5px;">${p.bidang}</td>
+      <td style="border: 1px solid black; padding: 5px;">${p.jabatan}</td>
+      <td style="border: 1px solid black; padding: 5px; text-align: center;">${p.isAdmin ? "Ya" : "Tidak"}</td>
+    </tr>`).join('');
+
+    let html = `<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word' xmlns='http://www.w3.org/TR/REC-html40'>
+    <head><meta charset='utf-8'><title>Data Pegawai</title></head><body>
+    <h2 style="text-align: center; font-family: sans-serif;">Data Pegawai Lapas Kelas IIB Kalabahi</h2>
+    <table style="border-collapse: collapse; width: 100%; font-family: sans-serif; font-size: 12px;">
+    <thead><tr>
+      <th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">No</th>
+      <th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">NIP</th>
+      <th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">Nama Pegawai</th>
+      <th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">Bidang</th>
+      <th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">Jabatan</th>
+      <th style="border: 1px solid black; padding: 8px; background-color: #f2f2f2;">Admin</th>
+    </tr></thead><tbody>${tableRows}</tbody></table></body></html>`;
+
+    const blob = new Blob(['\ufeff', html], { type: 'application/msword' });
+    const a = document.createElement('a'); a.href = window.URL.createObjectURL(blob);
+    a.download = `Data_Pegawai.doc`; a.click(); showToast("Diekspor ke Word!");
   };
 
-  const filteredPegawai = pegawaiList.filter(p => {
-    const matchSearch = p.nama.toLowerCase().includes(searchTerm.toLowerCase()) || p.nip.includes(searchTerm);
+  const cleanSearchTerm = searchTerm.trim().toLowerCase();
+  const displayPegawai = pegawaiList.filter(p => {
+    const matchSearch = p.nama.toLowerCase().includes(cleanSearchTerm) || p.nip.toLowerCase().includes(cleanSearchTerm);
     const matchBidang = filterBidang === 'Semua' || p.bidang === filterBidang;
     return matchSearch && matchBidang;
   });
 
-  const handleSelectAllPegawai = (e) => {
-    if (e.target.checked) setSelectedPegawaiIds(filteredPegawai.map(p => p.nip));
-    else setSelectedPegawaiIds([]);
-  };
-
-  const toggleSelectPegawai = (nip, isChecked) => {
-     if (isChecked) setSelectedPegawaiIds(prev => [...prev, nip]);
-     else setSelectedPegawaiIds(prev => prev.filter(i => i !== nip));
-  };
-
-  const handleBulkDeletePegawai = () => {
-    setConfirmDialog({
-        title: "Hapus Pegawai Massal",
-        message: `Apakah Anda yakin ingin menghapus ${selectedPegawaiIds.length} pegawai secara permanen?`,
-        isDanger: true,
-        onConfirm: async () => {
-            setConfirmDialog(null);
-            setLoading(true);
-            try {
-                const batch = writeBatch(db);
-                selectedPegawaiIds.forEach(nip => {
-                    const peg = pegawaiList.find(p => p.nip === nip);
-                    if (peg && peg.id) {
-                        batch.delete(doc(db, 'artifacts', appId, 'public', 'data', 'pegawai', peg.id));
-                    }
-                });
-                await batch.commit();
-                showToast(`${selectedPegawaiIds.length} pegawai berhasil dihapus!`);
-                setSelectedPegawaiIds([]);
-            } catch (e) {
-                showToast("Gagal menghapus pegawai massal", "error");
-            } finally {
-                setLoading(false);
-            }
-        }
-    });
-  };
-
   return (
     <div className="space-y-8">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="glass-card p-6 rounded-[2.5rem] flex items-center justify-between border-l-4 border-blue-500 shadow-xl">
+          <div><p className="text-[10px] font-black uppercase text-slate-500 mb-1">Total Pegawai</p><p className="text-3xl font-black text-slate-950 dark:text-white">{pegawaiList.length}</p></div><Users size={32} className="text-blue-500 opacity-20"/>
+        </div>
+        <div className="glass-card p-6 rounded-[2.5rem] flex items-center justify-between border-l-4 border-amber-500 shadow-xl">
+          <div><p className="text-[10px] font-black uppercase text-slate-500 mb-1">Permintaan Reset Sandi</p><p className="text-3xl font-black text-amber-500">{passRequests.length}</p></div><Key size={32} className="text-amber-500 opacity-20"/>
+        </div>
+        <div className="glass-card p-6 rounded-[2.5rem] flex items-center justify-between border-l-4 border-emerald-500 shadow-xl">
+          <div><p className="text-[10px] font-black uppercase text-slate-500 mb-1">Admin Sistem</p><p className="text-3xl font-black text-emerald-500">{pegawaiList.filter(p => p.isAdmin).length}</p></div><Shield size={32} className="text-emerald-500 opacity-20"/>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4">
+        <button onClick={() => setShowLocationModal(true)} className="glass-card p-6 rounded-3xl flex items-center gap-4 hover:scale-[1.02] transition-transform text-left border border-white/5 shadow-md max-w-sm">
+          <div className="p-4 bg-emerald-500/10 text-emerald-600 rounded-2xl"><MapPin size={24} /></div>
+          <div><p className="font-black text-slate-900 dark:text-white">Atur Titik Lokasi Presensi</p><p className="text-[9px] font-bold text-slate-500 mt-1 uppercase">Radius: {locationConfig.radius}m | Lat: {locationConfig.lat}</p></div>
+        </button>
+      </div>
+
       {passRequests.length > 0 && (
-        <div className="glass-card p-6 rounded-3xl border-l-4 border-amber-500 shadow-xl bg-amber-50/50 dark:bg-amber-900/10 mb-8">
-          <h3 className="text-sm font-black text-amber-700 dark:text-amber-500 mb-4 flex items-center gap-2"><AlertTriangle size={18}/> Permintaan Reset Password</h3>
+        <div className="glass-card p-8 rounded-[3rem] shadow-xl border border-amber-500/20">
+          <h3 className="text-sm font-black text-amber-500 mb-6 flex items-center gap-2"><Key size={18}/> Permintaan Reset Password</h3>
           <div className="space-y-3">
-            {passRequests.map(r => (
-              <div key={r.id} className="flex flex-col md:flex-row justify-between md:items-center bg-white dark:bg-slate-900 p-4 rounded-xl shadow-sm gap-4 border border-slate-100 dark:border-slate-800">
-                <div><p className="font-bold text-xs text-slate-900 dark:text-white">{r.nama}</p><p className="text-[9px] text-slate-500 uppercase mt-1">NIP: {r.nip}</p></div>
-                <div className="flex gap-2">
-                  <button onClick={() => deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'password_requests', r.id))} className="px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-lg text-[9px] font-black uppercase hover:bg-slate-200">Tolak</button>
-                  <button onClick={() => setConfirmDialog({ title: "Setujui Reset?", message: `Reset sandi ${r.nama} menjadi 123456?`, onConfirm: () => { setConfirmDialog(null); handleResetRequest(r); }})} className="px-4 py-2 bg-amber-500 text-white rounded-lg text-[9px] font-black uppercase shadow-lg shadow-amber-500/30">Setujui & Reset</button>
-                </div>
+            {passRequests.map(req => (
+              <div key={req.id} className="flex flex-col md:flex-row justify-between items-start md:items-center p-4 bg-amber-50/50 dark:bg-amber-900/10 rounded-2xl border border-amber-200/50 dark:border-amber-800/50 gap-4">
+                <div><p className="font-bold text-slate-900 dark:text-white">{req.reqNama || req.nama}</p><p className="text-[9px] font-bold text-slate-500 uppercase mt-1">NIP. {req.nip}</p></div>
+                <div className="flex gap-2 w-full md:w-auto"><button onClick={() => rejectReset(req.id)} className="flex-1 md:flex-none px-4 py-2 bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400 rounded-xl text-[9px] font-black uppercase hover:bg-slate-300">Abaikan</button><button onClick={() => handleResetPassword(req.nip)} disabled={loading} className="flex-1 md:flex-none px-4 py-2 bg-amber-500 text-white rounded-xl text-[9px] font-black uppercase shadow-lg hover:bg-amber-600">{loading ? 'Proses...' : 'Reset ke 123456'}</button></div>
               </div>
             ))}
           </div>
         </div>
       )}
 
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-white dark:bg-slate-900 p-8 rounded-3xl shadow-lg border border-white/5 gap-6">
-        <div>
-          <h3 className="text-2xl font-black text-slate-950 dark:text-white">Database Pegawai</h3>
-          <p className="text-[9px] font-bold text-slate-700 dark:text-slate-500 uppercase mt-1">Pegawai Terdaftar: {pegawaiList.length}</p>
-        </div>
-        <div className="flex flex-wrap gap-3 w-full md:w-auto">
-          <input type="file" accept=".xlsx" ref={fileInputRef} onChange={handleImportExcel} className="hidden" />
-          <button onClick={() => setPreviewData(dataAwal)} className="px-5 py-4 bg-purple-600 text-white rounded-2xl font-black uppercase text-[9px] btn-3d shadow-xl flex items-center gap-2"><Wand2 size={14}/> Sinkronisasi</button>
-          <button onClick={() => setShowAddModal(true)} className="px-5 py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[9px] btn-3d shadow-xl flex items-center gap-2"><Plus size={14}/> Tambah Pegawai</button>
-          <button onClick={() => setShowLocationModal(true)} className="px-4 py-4 bg-rose-600 text-white rounded-2xl font-black uppercase text-[9px] btn-3d shadow-xl flex items-center gap-2"><MapPin size={14}/> Set Lokasi</button>
-          <div className="h-full w-px bg-slate-200 dark:bg-slate-700 hidden md:block mx-1"></div>
-          <button onClick={() => fileInputRef.current.click()} className="px-4 py-4 bg-slate-800 text-white rounded-2xl font-black uppercase text-[9px] btn-3d flex items-center gap-2"><Upload size={14}/> Impor Excel (.xlsx)</button>
-          <button onClick={exportToExcel} className="px-4 py-4 bg-emerald-600 text-white rounded-2xl font-black uppercase text-[9px] btn-3d flex items-center gap-2"><FileSpreadsheet size={14}/> Excel (.xlsx)</button>
-          <button onClick={exportToWord} className="px-4 py-4 bg-indigo-600 text-white rounded-2xl font-black uppercase text-[9px] btn-3d flex items-center gap-2"><FileText size={14}/> Word</button>
-        </div>
-      </div>
-      
-      <div className="flex flex-col xl:flex-row gap-4 mb-4 justify-between items-center mt-6">
-        <div className="flex flex-col sm:flex-row gap-4 w-full xl:w-auto flex-1">
-          <div className="relative w-full sm:w-80">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-            <input type="text" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Cari Nama / NIP Pegawai..." className="w-full pl-10 pr-4 py-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-xs font-bold shadow-sm focus:border-blue-500 outline-none transition-colors" />
-          </div>
-          <div className="relative w-full sm:w-56">
-            <Filter className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-            <select value={filterBidang} onChange={e => setFilterBidang(e.target.value)} className="w-full pl-10 pr-4 py-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl text-[10px] font-black uppercase tracking-widest shadow-sm focus:border-blue-500 outline-none transition-colors appearance-none cursor-pointer">
-              <option value="Semua">Semua Bidang</option>
-              {bidangs.map(b => <option key={b} value={b}>{b}</option>)}
-            </select>
+      <div className="glass-card p-8 md:p-10 rounded-[3rem] shadow-2xl">
+        <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-6 mb-8 border-b border-slate-100 dark:border-slate-800 pb-6">
+          <div><h3 className="text-xl font-black text-slate-950 dark:text-white flex items-center gap-3"><Users size={24} className="text-blue-600"/> Direktori Pegawai</h3><p className="text-[9px] font-bold text-slate-500 uppercase mt-2">Kelola Data dan Hak Akses</p></div>
+          <div className="flex flex-wrap gap-3 w-full xl:w-auto">
+            <button onClick={() => setShowAddModal(true)} className="px-5 py-3 bg-blue-600 text-white rounded-xl font-black text-[10px] uppercase shadow-lg hover:scale-105 transition-transform flex items-center gap-2">
+              <UserPlus size={14}/> Tambah Pegawai
+            </button>
+            <input type="file" accept=".xlsx" ref={importPegawaiRef} onChange={handleImportPegawai} className="hidden" />
+            <button onClick={() => importPegawaiRef.current.click()} disabled={isImportingPegawai} className="px-4 py-3 bg-emerald-600 text-white rounded-xl font-black text-[10px] uppercase shadow-lg hover:scale-105 transition-transform flex items-center gap-2" title="Impor Data Pegawai dari Excel (.xlsx)">
+              <Upload size={14}/> {isImportingPegawai ? 'Proses...' : 'Impor'}
+            </button>
+            <button onClick={handlePrintPegawai} className="px-4 py-3 bg-slate-800 text-white rounded-xl font-black text-[10px] uppercase shadow-lg hover:scale-105 transition-transform flex items-center gap-2" title="Cetak Data Pegawai">
+              <Printer size={14}/> Print
+            </button>
+            <button onClick={exportPegawaiToExcel} className="px-4 py-3 bg-emerald-600 text-white rounded-xl font-black text-[10px] uppercase shadow-lg hover:scale-105 transition-transform flex items-center gap-2" title="Eksport ke Excel (.xlsx)">
+              <FileSpreadsheet size={14}/> Excel
+            </button>
+            <button onClick={exportPegawaiToWord} className="px-4 py-3 bg-indigo-600 text-white rounded-xl font-black text-[10px] uppercase shadow-lg hover:scale-105 transition-transform flex items-center gap-2" title="Eksport ke Word (.doc)">
+              <FileText size={14}/> Word
+            </button>
           </div>
         </div>
-        
-        {pegawaiList.length > 0 && (
-          <div className="flex flex-wrap items-center gap-4 w-full xl:w-auto p-4 bg-white dark:bg-slate-900 rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800">
-            <label className="flex items-center gap-2 cursor-pointer mr-2">
-              <input type="checkbox" onChange={handleSelectAllPegawai} checked={selectedPegawaiIds.length === filteredPegawai.length && filteredPegawai.length > 0} className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500" />
-              <span className="text-[10px] font-black uppercase text-slate-600 dark:text-slate-400">Pilih Semua</span>
-            </label>
-            {selectedPegawaiIds.length > 0 && (
-              <div className="flex gap-2">
-                <button onClick={() => setShowBulkAbsenModal(true)} className="px-4 py-3 bg-emerald-600 text-white rounded-xl text-[10px] font-black uppercase btn-3d shrink-0 flex items-center gap-2 hover:bg-emerald-700 transition-colors"><CheckCircle2 size={16}/> Absen Pegawai ({selectedPegawaiIds.length})</button>
-                <button onClick={handleBulkDeletePegawai} className="px-4 py-3 bg-rose-600 text-white rounded-xl text-[10px] font-black uppercase btn-3d shrink-0 flex items-center gap-2 hover:bg-rose-700 transition-colors"><Trash2 size={16}/> Hapus ({selectedPegawaiIds.length})</button>
-              </div>
+
+        <div className="flex flex-col md:flex-row gap-4 mb-6 items-start md:items-center justify-between">
+            <div className="flex flex-col sm:flex-row gap-4 w-full md:w-auto flex-1">
+                <div className="relative w-full sm:w-64">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                    <input type="text" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Cari Nama atau NIP..." className="w-full pl-10 pr-4 py-3 bg-slate-100 dark:bg-slate-900 border-none rounded-xl text-xs font-bold focus:ring-2 focus:ring-blue-500 outline-none transition-all shadow-inner" />
+                </div>
+                <div className="relative w-full sm:w-auto">
+                   <Filter className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+                   <select value={filterBidang} onChange={e => setFilterBidang(e.target.value)} className="w-full sm:w-auto pl-9 pr-8 py-3 bg-slate-100 dark:bg-slate-900 border-none rounded-xl text-[10px] font-black uppercase tracking-widest focus:ring-2 focus:ring-blue-500 outline-none appearance-none cursor-pointer shadow-inner">
+                      <option value="Semua">Semua Bidang</option>
+                      {bidangs.map(b => <option key={b} value={b}>{b}</option>)}
+                   </select>
+                </div>
+            </div>
+            
+            {displayPegawai.length > 0 && (
+                <div className="flex items-center gap-4 w-full md:w-auto p-3 bg-slate-100 dark:bg-slate-900 rounded-xl">
+                    <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" onChange={handleSelectAllPegawai} checked={selectedPegawaiIds.length === displayPegawai.length && displayPegawai.length > 0} className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer" />
+                        <span className="text-[10px] font-black uppercase text-slate-600 dark:text-slate-400">Pilih Semua</span>
+                    </label>
+                    {selectedPegawaiIds.length > 0 && (
+                        <div className="flex items-center gap-2">
+                           {currentUser.isMainAdmin && (
+                              <button onClick={() => setManualAbsenTarget(displayPegawai.filter(p => selectedPegawaiIds.includes(p.id)))} className="px-4 py-2 bg-emerald-600 text-white rounded-lg text-[9px] font-black uppercase shadow-md flex items-center gap-1 hover:bg-emerald-700 shrink-0"><CalendarDays size={12}/> Absen ({selectedPegawaiIds.length})</button>
+                           )}
+                           <button onClick={handleBulkDeletePegawai} className="px-4 py-2 bg-rose-600 text-white rounded-lg text-[9px] font-black uppercase shadow-md flex items-center gap-1 hover:bg-rose-700 shrink-0"><Trash2 size={12}/> Hapus ({selectedPegawaiIds.length})</button>
+                        </div>
+                    )}
+                </div>
             )}
-          </div>
-        )}
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {filteredPegawai.map(p => (
-          <div key={p.nip} className={`p-6 glass-card rounded-3xl flex justify-between items-center transition-transform hover:scale-[1.01] gap-4 ${selectedPegawaiIds.includes(p.nip) ? 'border-2 border-emerald-500 shadow-md bg-emerald-50/20 dark:bg-emerald-900/10' : ''}`}>
-            <div className="flex items-center gap-4">
-              <input type="checkbox" checked={selectedPegawaiIds.includes(p.nip)} onChange={(e) => toggleSelectPegawai(p.nip, e.target.checked)} className="w-5 h-5 rounded text-blue-600 focus:ring-blue-500 cursor-pointer" />
-              <div className="text-left"><p className="font-black text-sm text-slate-950 dark:text-white leading-none">{p.nama}</p><p className="text-[9px] font-bold text-slate-600 dark:text-slate-400 mt-2 uppercase">{p.nip} | <span className="text-blue-600">{p.bidang}</span> {p.jabatan && <span className="opacity-70">| {p.jabatan}</span>}</p></div>
-            </div>
-            <div className="flex gap-2 shrink-0">
-              <button onClick={() => toggleBypassGps(p)} className={`p-3 rounded-xl ${p.bypassGps ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20 dark:text-emerald-400' : 'bg-slate-50 text-slate-400 dark:bg-slate-800 dark:text-slate-500'} transition-colors`} title={p.bypassGps ? "Cabut Izin Bypass GPS" : "Izinkan Absen Tanpa Verifikasi GPS"}><MapPinOff size={14}/></button>
-              <button onClick={() => setEditPegawaiTarget(p)} className="p-3 bg-blue-50 dark:bg-blue-900/20 text-blue-600 rounded-xl" title="Edit Pegawai"><Edit size={14}/></button>
-              <button onClick={() => setTargetPassUser(p)} className="p-3 bg-amber-50 dark:bg-amber-900/20 text-amber-600 rounded-xl" title="Lihat/Ubah Sandi"><Key size={14}/></button>
-              <button onClick={() => setConfirmDialog({ title: "Hapus Pegawai", message: `Yakin ingin menghapus ${p.nama}?`, isDanger: true, onConfirm: async () => { setConfirmDialog(null); await deleteDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pegawai', p.id)); showToast("Pegawai dihapus"); } })} className="p-3 bg-rose-50 dark:bg-rose-900/20 text-rose-600 rounded-xl"><Trash2 size={14}/></button>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {previewData && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md">
-          <div className="glass-card w-full max-w-2xl max-h-[80vh] rounded-[3rem] overflow-hidden flex flex-col">
-            <div className="p-10 border-b border-white/10 flex justify-between items-center text-white"><div><h3 className="text-2xl font-black">Pratinjau Impor</h3></div><button onClick={() => setPreviewData(null)}><X size={24}/></button></div>
-            <div className="flex-1 overflow-y-auto p-10 space-y-3 bg-slate-900/30">
-              {previewData.slice(0, 50).map((p, i) => <div key={i} className="p-4 bg-white/5 rounded-2xl border border-white/5 text-left"><p className="text-white font-bold text-xs">{p.nama}</p><p className="text-[9px] text-slate-500 mt-1 uppercase">NIP: {p.nip}</p></div>)}
-            </div>
-            <div className="p-10 flex justify-end gap-4"><button onClick={() => setPreviewData(null)} className="text-slate-400 font-black uppercase text-[9px]">Batal</button><button onClick={handleGenerate} className="px-10 py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[9px] btn-3d">Konfirmasi Impor</button></div>
-          </div>
         </div>
-      )}
 
-      {showAddModal && <AddPegawaiModal db={db} appId={appId} showToast={showToast} onClose={() => setShowAddModal(false)} />}
-      {editPegawaiTarget && <EditPegawaiModal db={db} appId={appId} pegawai={editPegawaiTarget} showToast={showToast} onClose={() => setEditPegawaiTarget(null)} />}
-      {showBulkAbsenModal && <AdminBulkAbsenModal selectedNips={selectedPegawaiIds} locationConfig={locationConfig} pegawaiList={pegawaiList} db={db} appId={appId} showToast={showToast} onClose={() => {setShowBulkAbsenModal(false); setSelectedPegawaiIds([]);}} />}
-      {showLocationModal && <AdminLocationModal locationConfig={locationConfig} db={db} appId={appId} showToast={showToast} onClose={() => setShowLocationModal(false)} />}
-      {targetPassUser && <AdminEditPasswordModal targetUser={targetPassUser} credentials={credentials} db={db} appId={appId} onClose={() => setTargetPassUser(null)} showToast={showToast} />}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          {displayPegawai.length === 0 ? (
+            <div className="col-span-full text-center py-12 bg-slate-50 dark:bg-slate-900/20 rounded-3xl border-2 border-dashed border-slate-200 dark:border-slate-800">
+               <p className="text-slate-400 font-bold text-[10px] uppercase">Tidak ada data pegawai. Gunakan tombol 'Tambah Pegawai' atau 'Impor' untuk memulai.</p>
+            </div>
+          ) : (
+            displayPegawai.map(p => (
+              <div key={p.nip} className={`p-5 rounded-2xl border transition-all flex flex-col justify-between gap-4 ${selectedPegawaiIds.includes(p.id) ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 shadow-md' : 'bg-slate-50 dark:bg-slate-900/50 border-slate-100 dark:border-slate-800 hover:shadow-md hover:-translate-y-1'}`}>
+                 <div className="flex items-start gap-4">
+                   <div className="pt-2">
+                     <input type="checkbox" checked={selectedPegawaiIds.includes(p.id)} onChange={(e) => toggleSelectPegawai(p.id, e.target.checked)} className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer" />
+                   </div>
+                   <div className={`w-12 h-12 rounded-full flex items-center justify-center font-black text-lg shrink-0 shadow-sm ${p.isAdmin ? 'bg-emerald-100 text-emerald-600' : 'bg-blue-100 text-blue-600'}`}>
+                     {p.nama.charAt(0)}
+                   </div>
+                   <div className="flex-1">
+                     <p className="font-black text-sm text-slate-900 dark:text-white leading-tight">{p.nama} {p.isAdmin && <Shield size={12} className="inline text-emerald-500 ml-1" title="Admin" />}</p>
+                     <p className="text-[9px] font-bold text-slate-500 mt-1 uppercase">NIP. {p.nip}</p>
+                     <p className="text-[9px] font-bold text-blue-600 mt-1.5 uppercase tracking-widest bg-blue-100/50 dark:bg-blue-900/30 px-2 py-1 rounded-md w-fit">{p.bidang} - {p.jabatan}</p>
+                   </div>
+                 </div>
+                 
+                 <div className="flex flex-wrap items-center justify-between gap-4 mt-2 pt-4 border-t border-slate-200/50 dark:border-slate-700/50">
+                    <div className="flex flex-wrap gap-2">
+                      <button onClick={() => toggleAdminStatus(p)} className={`px-2 py-1.5 rounded-md text-[8px] font-black uppercase text-center border transition-colors ${p.isAdmin ? 'bg-emerald-100 border-emerald-200 text-emerald-700 dark:bg-emerald-900/40 dark:border-emerald-800/50 dark:text-emerald-400' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400'}`}>{p.isAdmin ? 'Akses Admin' : 'Jadikan Admin'}</button>
+                      <button onClick={() => toggleBypassGps(p)} className={`px-2 py-1.5 rounded-md text-[8px] font-black uppercase text-center border transition-colors ${p.bypassGps ? 'bg-amber-100 border-amber-200 text-amber-700 dark:bg-amber-900/40 dark:border-amber-800/50 dark:text-amber-400' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100 dark:bg-slate-800 dark:border-slate-700 dark:text-slate-400'}`}>{p.bypassGps ? 'Bypass GPS' : 'Verifikasi GPS'}</button>
+                    </div>
+                    
+                    <div className="flex items-center gap-2">
+                      {currentUser.isMainAdmin && (
+                        <button onClick={() => setManualAbsenTarget([p])} className="p-2.5 bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-500 hover:scale-110 hover:bg-emerald-200 rounded-lg transition-all" title="Input Absen Manual"><CalendarDays size={14} /></button>
+                      )}
+                      <button onClick={() => setTargetPassUser(p)} className="p-2.5 bg-amber-100 text-amber-600 dark:bg-amber-900/30 dark:text-amber-500 hover:scale-110 hover:bg-amber-200 rounded-lg transition-all" title="Ubah Password"><Key size={14} /></button>
+                      <button onClick={() => setEditPegawaiTarget(p)} className="p-2.5 bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-500 hover:scale-110 hover:bg-blue-200 rounded-lg transition-all" title="Edit Data"><Edit size={14} /></button>
+                      <button onClick={() => deletePegawai(p.id)} className="p-2.5 bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-500 hover:scale-110 hover:bg-rose-200 rounded-lg transition-all" title="Hapus"><Trash2 size={14} /></button>
+                    </div>
+                 </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+
+      {showAddModal && <PegawaiModal db={db} appId={appId} onClose={() => setShowAddModal(false)} showToast={showToast} />}
+      {editPegawaiTarget && <PegawaiModal db={db} appId={appId} editData={editPegawaiTarget} onClose={() => setEditPegawaiTarget(null)} showToast={showToast} />}
+      {targetPassUser && <PasswordModal currentUser={currentUser} targetUser={targetPassUser} credentials={credentials} db={db} appId={appId} onClose={() => setTargetPassUser(null)} showToast={showToast} />}
+      {manualAbsenTarget && <AdminManualAbsenModal targets={manualAbsenTarget} locationConfig={locationConfig} db={db} appId={appId} onClose={() => { setManualAbsenTarget(null); setSelectedPegawaiIds([]); }} showToast={showToast} />}
+      {showLocationModal && <LocationConfigModal locationConfig={locationConfig} db={db} appId={appId} onClose={() => setShowLocationModal(false)} showToast={showToast} />}
       {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
     </div>
   );
 }
 
-function AdminLocationModal({ locationConfig, db, appId, onClose, showToast }) {
+function AdminManualAbsenModal({ targets, locationConfig, db, appId, onClose, showToast }) {
+  const [type, setType] = useState('Masuk');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const dObj = new Date();
+  const initialDate = `${dObj.getFullYear()}-${String(dObj.getMonth() + 1).padStart(2, '0')}-${String(dObj.getDate()).padStart(2, '0')}`;
+  const [startDate, setStartDate] = useState(initialDate);
+  const [endDate, setEndDate] = useState(initialDate);
+  const [timeStr, setTimeStr] = useState('07:30');
+
+  const handleSave = async (e) => {
+    e.preventDefault(); setIsSubmitting(true);
+    try {
+      const start = new Date(startDate); const end = new Date(endDate);
+      if (end < start) { showToast("Tanggal selesai tidak valid!", "error"); setIsSubmitting(false); return; }
+
+      const [hour, minute] = timeStr.replace(/\./g, ':').split(':').map(Number);
+      let batch = writeBatch(db);
+      let count = 0;
+      let totalCommitted = 0;
+
+      for (const target of targets) {
+          let currentDate = new Date(start);
+          while (currentDate <= end) {
+            const targetDate = new Date(currentDate); targetDate.setHours(hour, minute, 0, 0);
+            const dateStr = formatDateIndo(targetDate); const ts = targetDate.getTime();
+            const docRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'absensi'));
+            batch.set(docRef, {
+              username: target.nip, displayName: target.nama, type, timestamp: ts, dateStr: dateStr, timeStr: timeStr, photoStr: null, location: { manual: true, lat: locationConfig.lat, lng: locationConfig.lng }, distance: 0, deviceVerified: true, isServerSynced: true, antiManipulationEnabled: true, timezone: 'WITA', isAuto: true, adminFilled: true
+            });
+            count++;
+            totalCommitted++;
+
+            // Mencegah error batas 500 proses simultan di Firebase dengan metode chunk
+            if (count >= 400) {
+                await batch.commit();
+                batch = writeBatch(db);
+                count = 0;
+            }
+            currentDate.setDate(currentDate.getDate() + 1);
+          }
+      }
+      if (count > 0) {
+          await batch.commit();
+      }
+      showToast(`Berhasil menyimpan ${totalCommitted} data absen manual!`); onClose();
+    } catch (err) { showToast("Gagal memproses absen manual", "error"); } finally { setIsSubmitting(false); }
+  };
+
+  const targetNames = targets.length === 1 ? targets[0].nama : `${targets.length} Pegawai Terpilih`;
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md">
+      <div className="glass-card p-10 rounded-[3rem] max-w-sm w-full text-center shadow-2xl animate-in zoom-in border border-white/10">
+        <CalendarDays size={40} className="text-emerald-500 mx-auto mb-4" />
+        <h2 className="text-xl font-black mb-1 text-slate-950 dark:text-white">Absen Manual</h2>
+        <p className="text-[9px] font-bold uppercase text-slate-500 mb-6 tracking-widest leading-tight">Admin Input Untuk:<br/>{targetNames}</p>
+        <form onSubmit={handleSave} className="space-y-4 text-left">
+          <div className="space-y-1"><label className="text-[8px] font-black uppercase text-slate-500 ml-2">Jenis Absensi</label><select value={type} onChange={e=>setType(e.target.value)} className="w-full p-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold">{['Masuk','Keluar','Lepas Piket','Sakit','Cuti','Dinas Luar','BKO'].map(t=><option key={t} value={t}>{t}</option>)}</select></div>
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1"><label className="text-[8px] font-black uppercase text-slate-500 ml-2">Tgl Mulai</label><input type="date" value={startDate} onChange={e=>setStartDate(e.target.value)} className="w-full px-4 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-[10px] font-bold uppercase dark:[color-scheme:dark]" /></div>
+            <div className="space-y-1"><label className="text-[8px] font-black uppercase text-slate-500 ml-2">Tgl Selesai</label><input type="date" value={endDate} onChange={e=>setEndDate(e.target.value)} min={startDate} className="w-full px-4 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-[10px] font-bold uppercase dark:[color-scheme:dark]" /></div>
+          </div>
+          <div className="space-y-1"><label className="text-[8px] font-black uppercase text-slate-500 ml-2">Waktu / Jam (WITA)</label><input type="time" value={timeStr} onChange={e=>setTimeStr(e.target.value)} className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold dark:[color-scheme:dark]" required /></div>
+          <button type="submit" disabled={isSubmitting} className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black uppercase text-[10px] btn-3d mt-4">{isSubmitting ? 'Menyimpan...' : 'Submit Laporan'}</button>
+          <button type="button" onClick={onClose} disabled={isSubmitting} className="w-full py-2 text-slate-600 text-[9px] font-black uppercase mt-2">Batal</button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function PegawaiModal({ db, appId, editData, onClose, showToast }) {
+  const [formData, setFormData] = useState(editData || { nip: '', nama: '', bidang: 'Tata Usaha', jabatan: '' });
+  const [loading, setLoading] = useState(false);
+  const bidangs = ["KALAPAS", "Tata Usaha", "KPLP", "Adm Kamtib", "Binadikgiatja"];
+
+  const handleSave = async (e) => {
+    e.preventDefault(); setLoading(true);
+    try {
+      const cleanData = { ...formData, nip: formData.nip.trim() };
+      if (editData) await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pegawai', editData.id), cleanData);
+      else await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pegawai'), cleanData);
+      showToast(editData ? "Data diperbarui!" : "Pegawai ditambahkan!"); onClose();
+    } catch(err) { showToast("Gagal menyimpan", "error"); } finally { setLoading(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md">
+      <div className="glass-card p-10 rounded-[3rem] max-w-md w-full border border-white/10 shadow-2xl animate-in zoom-in">
+        <User size={40} className="text-blue-500 mx-auto mb-4" /><h2 className="text-xl font-black mb-6 text-center text-slate-950 dark:text-white">{editData ? 'Edit Data Pegawai' : 'Tambah Pegawai Baru'}</h2>
+        <form onSubmit={handleSave} className="space-y-4">
+          <input type="text" value={formData.nip} onChange={e=>setFormData({...formData, nip: e.target.value})} placeholder="NIP" className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold" required />
+          <input type="text" value={formData.nama} onChange={e=>setFormData({...formData, nama: e.target.value.toUpperCase()})} placeholder="NAMA LENGKAP" className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold uppercase" required />
+          <select value={formData.bidang} onChange={e=>setFormData({...formData, bidang: e.target.value})} className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold">
+            {bidangs.map(b => <option key={b} value={b}>{b}</option>)}
+          </select>
+          <input type="text" value={formData.jabatan} onChange={e=>setFormData({...formData, jabatan: e.target.value.toUpperCase()})} placeholder="JABATAN" className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold uppercase" required />
+          <button type="submit" disabled={loading} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] mt-4 btn-3d">{loading ? 'Menyimpan...' : 'Simpan Data'}</button>
+          <button type="button" onClick={onClose} className="w-full py-2 text-slate-600 text-[9px] font-black uppercase mt-2">Batal</button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function PasswordModal({ currentUser, targetUser, credentials, db, appId, onClose, showToast }) {
+  const [newPass, setNewPass] = useState(''); const [loading, setLoading] = useState(false);
+  const isEditingSelf = !targetUser; const nipToEdit = isEditingSelf ? currentUser.rawUsername : targetUser.nip;
+
+  const handleSave = async (e) => {
+    e.preventDefault(); 
+    if (!newPass || newPass.length < 4) return showToast("Password minimal 4 karakter", "error");
+
+    if (isEditingSelf && currentUser.role === 'admin' && currentUser.rawUsername === '2001') {
+       showToast("Untuk Admin Utama, kata laluan dipatenkan!", "error"); return;
+    }
+
+    if (!isEditingSelf && !currentUser.isMainAdmin) {
+       showToast("Hanya Admin Utama yang boleh mengubah password orang lain!", "error"); return;
+    }
+
+    setLoading(true);
+    try {
+      const cred = credentials.find(c => c.username === nipToEdit);
+      if (cred) await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'credentials', cred.id), { password: newPass });
+      else await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'credentials'), { username: nipToEdit, password: newPass });
+      showToast(`Password untuk ${isEditingSelf ? 'Anda' : targetUser.nama} berjaya diubah!`); onClose();
+    } catch(err) { showToast("Gagal menyimpan", "error"); } finally { setLoading(false); }
+  };
+  return (
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md">
+      <div className="glass-card p-10 rounded-[3rem] max-w-sm w-full text-center shadow-2xl animate-in zoom-in">
+        <Key size={40} className="text-blue-500 mx-auto mb-4" /><h2 className="text-xl font-black mb-1 text-slate-950 dark:text-white">Ubah Password</h2><p className="text-[9px] font-bold uppercase text-slate-500 mb-6">{isEditingSelf ? 'Untuk Akun Anda' : `Untuk ${targetUser.nama}`}</p>
+        <form onSubmit={handleSave} className="space-y-4">
+          <input type="text" value={newPass} onChange={e=>setNewPass(e.target.value)} placeholder="Masukkan Password Baru" className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold" />
+          <button type="submit" disabled={loading} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] mt-4 btn-3d">{loading ? 'Menyimpan...' : 'Simpan Password'}</button>
+          <button type="button" onClick={onClose} className="w-full py-2 text-slate-600 text-[9px] font-black uppercase mt-2">Batal</button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function LocationConfigModal({ locationConfig, db, appId, onClose, showToast }) {
   const [lat, setLat] = useState(locationConfig.lat);
   const [lng, setLng] = useState(locationConfig.lng);
   const [radius, setRadius] = useState(locationConfig.radius);
   const [loading, setLoading] = useState(false);
+  const [isFetchingGps, setIsFetchingGps] = useState(false);
 
-  const handleSave = async (e) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'lokasi'), {
-        lat: parseFloat(lat), lng: parseFloat(lng), radius: parseInt(radius, 10)
-      });
-      showToast("Pengaturan lokasi berhasil disimpan!");
-      onClose();
-    } catch (err) { showToast("Gagal menyimpan pengaturan lokasi", "error"); } finally { setLoading(false); }
-  };
-
-  const getCurrentLocation = () => {
-    if (!navigator.geolocation) return showToast("Browser tidak mendukung GPS", "error");
-    showToast("Mencari koordinat saat ini...", "success");
+  const handleGetMyLocation = () => {
+    if (!navigator.geolocation) {
+      showToast("Browser Anda tidak menyokong fungsi GPS.", "error");
+      return;
+    }
+    setIsFetchingGps(true);
+    showToast("Sedang mencari titik koordinat GPS...");
     navigator.geolocation.getCurrentPosition(
-      (pos) => { setLat(pos.coords.latitude); setLng(pos.coords.longitude); showToast("Koordinat berhasil didapatkan!", "success"); },
-      (err) => showToast("Gagal mendapatkan lokasi", "error"), { enableHighAccuracy: true }
+      (pos) => {
+        setLat(pos.coords.latitude);
+        setLng(pos.coords.longitude);
+        setIsFetchingGps(false);
+        showToast("Koordinat lokasi berjaya didapatkan!");
+      },
+      (err) => {
+        showToast("Gagal mendapatkan lokasi. Sila pastikan kebenaran GPS diberikan.", "error");
+        setIsFetchingGps(false);
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
   };
 
-  return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md">
-      <div className="glass-card p-10 rounded-[3rem] max-w-sm w-full border border-white/10 shadow-2xl animate-in zoom-in">
-        <MapPin size={40} className="text-rose-500 mx-auto mb-4" />
-        <h2 className="text-xl font-black mb-1 text-center text-slate-950 dark:text-white">Pengaturan Lokasi & Jarak</h2>
-        <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-6 text-center">Titik Pusat Absensi Pegawai</p>
-        <form onSubmit={handleSave} className="space-y-4 text-left">
-          <div className="space-y-1">
-            <label className="text-[8px] font-black uppercase text-slate-500 ml-2">Latitude</label>
-            <input type="number" step="any" value={lat} onChange={e=>setLat(e.target.value)} className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold dark:[color-scheme:dark]" required />
-          </div>
-          <div className="space-y-1">
-            <label className="text-[8px] font-black uppercase text-slate-500 ml-2">Longitude</label>
-            <input type="number" step="any" value={lng} onChange={e=>setLng(e.target.value)} className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold dark:[color-scheme:dark]" required />
-          </div>
-          <div className="space-y-1">
-            <label className="text-[8px] font-black uppercase text-slate-500 ml-2">Toleransi Jarak Maksimal (Meter)</label>
-            <input type="number" value={radius} onChange={e=>setRadius(e.target.value)} className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold dark:[color-scheme:dark]" required min="10" />
-          </div>
-          <button type="button" onClick={getCurrentLocation} className="w-full py-3 bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 rounded-2xl font-black uppercase text-[9px] flex items-center justify-center gap-2 hover:scale-105 transition-transform"><MapPin size={12}/> Ambil Koordinat Saat Ini</button>
-          <button type="submit" disabled={loading} className="w-full py-4 bg-rose-600 text-white rounded-2xl font-black uppercase text-[10px] mt-4 shadow-xl hover:scale-105 transition-transform btn-3d">{loading ? 'Menyimpan...' : 'Simpan Pengaturan'}</button>
-          <button type="button" onClick={onClose} className="w-full py-2 text-slate-600 text-[9px] font-black uppercase mt-2">Batal</button>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-function AdminBulkAbsenModal({ selectedNips, pegawaiList, locationConfig, db, appId, onClose, showToast }) {
-  const [type, setType] = useState('Masuk');
-  const [startDate, setStartDate] = useState(new Date().toISOString().split('T')[0]);
-  const [endDate, setEndDate] = useState(new Date().toISOString().split('T')[0]);
-  const [waktu, setWaktu] = useState('07:30');
-  const [loading, setLoading] = useState(false);
-
-  const handleSubmit = async (e) => {
-     e.preventDefault();
-     const start = new Date(startDate);
-     const end = new Date(endDate);
-     
-     if (end < start) { 
-        return showToast("Tanggal berakhir harus setelah atau sama dengan tanggal mulai!", "error"); 
-     }
-     
-     setLoading(true);
-     try {
-        const batch = writeBatch(db);
-        let currentDate = new Date(start);
-        let totalDocs = 0;
-
-        while (currentDate <= end) {
-           const targetDate = new Date(currentDate);
-           const [h, m] = waktu.replace(/\./g, ':').split(':').map(Number);
-           targetDate.setHours(h, m, 0, 0);
-
-           selectedNips.forEach(nip => {
-              const pegawai = pegawaiList.find(p => p.nip === nip);
-              if(!pegawai) return;
-
-              const docRef = doc(collection(db, 'artifacts', appId, 'public', 'data', 'absensi'));
-              batch.set(docRef, {
-                 username: pegawai.nip,
-                 displayName: pegawai.nama,
-                 type: type,
-                 timestamp: targetDate.getTime(),
-                 dateStr: formatDateIndo(targetDate),
-                 timeStr: waktu,
-                 photoStr: null,
-                 location: { manual: true, lat: locationConfig.lat, lng: locationConfig.lng },
-                 distance: 0,
-                 deviceVerified: true,
-                 isServerSynced: true,
-                 antiManipulationEnabled: true,
-                 timezone: 'WITA',
-                 isAuto: true,
-                 adminFilled: true
-              });
-              totalDocs++;
-           });
-           
-           currentDate.setDate(currentDate.getDate() + 1);
-        }
-        
-        if(totalDocs > 0) {
-            await batch.commit();
-            showToast(`Berhasil menambahkan ${totalDocs} data absen pegawai!`);
-        }
-        onClose();
-     } catch(err) {
-        showToast("Gagal memproses absen pegawai", "error");
-     } finally { setLoading(false); }
-  };
-
-  return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md">
-      <div className="glass-card p-10 rounded-[3rem] max-w-sm w-full border border-white/10 shadow-2xl animate-in zoom-in">
-        <CheckCircle2 size={40} className="text-emerald-500 mx-auto mb-4" />
-        <h2 className="text-xl font-black mb-1 text-center text-slate-950 dark:text-white">Absen Pegawai (Bypass GPS)</h2>
-        <p className="text-[9px] font-bold uppercase tracking-widest text-slate-500 mb-6 text-center">Untuk {selectedNips.length} Pegawai Terpilih</p>
-        <form onSubmit={handleSubmit} className="space-y-4 text-left">
-          <div className="space-y-1">
-            <label className="text-[8px] font-black uppercase text-slate-500 ml-2">Pilih Status</label>
-            <select value={type} onChange={e=>setType(e.target.value)} className="w-full p-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold">{['Masuk','Keluar','Lepas Piket','Sakit','Cuti','Dinas Luar','BKO'].map(t=><option key={t} value={t}>{t}</option>)}</select>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-             <div className="space-y-1">
-               <label className="text-[8px] font-black uppercase text-slate-500 ml-2">Tanggal Mulai</label>
-               <input type="date" value={startDate} onChange={e=>setStartDate(e.target.value)} className="w-full px-4 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-[10px] font-bold uppercase dark:[color-scheme:dark]" />
-             </div>
-             <div className="space-y-1">
-               <label className="text-[8px] font-black uppercase text-slate-500 ml-2">Tanggal Berakhir</label>
-               <input type="date" value={endDate} onChange={e=>setEndDate(e.target.value)} min={startDate} className="w-full px-4 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-[10px] font-bold uppercase dark:[color-scheme:dark]" />
-             </div>
-          </div>
-          <div className="space-y-1">
-            <label className="text-[8px] font-black uppercase text-slate-500 ml-2">Waktu / Jam</label>
-            <input type="time" value={waktu} onChange={e=>setWaktu(e.target.value)} className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold dark:[color-scheme:dark]" />
-          </div>
-          <button type="submit" disabled={loading} className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black uppercase text-[10px] mt-4 shadow-xl hover:scale-105 transition-transform btn-3d">{loading ? 'Memproses...' : 'Proses Absen Pegawai'}</button>
-          <button type="button" onClick={onClose} className="w-full py-2 text-slate-600 text-[9px] font-black uppercase mt-2">Batal</button>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-function AddPegawaiModal({ db, appId, onClose, showToast }) {
-  const [nip, setNip] = useState(''); const [nama, setNama] = useState(''); const [bidang, setBidang] = useState('Tata Usaha'); const [jabatan, setJabatan] = useState(''); const [loading, setLoading] = useState(false);
-  const handleSubmit = async (e) => { e.preventDefault(); if (!nip || !nama) return showToast("NIP dan Nama Wajib", "error"); setLoading(true); try { await setDoc(doc(collection(db, 'artifacts', appId, 'public', 'data', 'pegawai')), { nip: nip.replace(/\s+/g, ''), nama, bidang, jabatan }); showToast("Ditambahkan!"); onClose(); } catch (error) { showToast("Gagal", "error"); } finally { setLoading(false); } };
-  return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md">
-      <div className="glass-card p-10 rounded-[3rem] max-w-sm w-full border border-white/10 shadow-2xl animate-in zoom-in">
-        <UserPlus size={40} className="text-blue-500 mx-auto mb-4" /><h2 className="text-xl font-black mb-6 text-center text-slate-950 dark:text-white">Tambah Pegawai</h2>
-        <form onSubmit={handleSubmit} className="space-y-4 text-left">
-          <input type="text" value={nip} onChange={e=>setNip(e.target.value)} placeholder="NIP Pegawai" className="w-full px-5 py-3 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold" />
-          <input type="text" value={nama} onChange={e=>setNama(e.target.value)} placeholder="Nama Lengkap" className="w-full px-5 py-3 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold" />
-          <select value={bidang} onChange={e=>setBidang(e.target.value)} className="w-full p-3 bg-slate-100 dark:bg-slate-900 rounded-2xl font-bold text-xs">{['KALAPAS', 'Tata Usaha', 'KPLP', 'Adm Kamtib', 'Binadikgiatja'].map(b => <option key={b} value={b}>{b}</option>)}</select>
-          <input type="text" value={jabatan} onChange={e=>setJabatan(e.target.value)} placeholder="Jabatan (Opsional)" className="w-full px-5 py-3 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold" />
-          <button type="submit" disabled={loading} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] btn-3d mt-4">Simpan</button>
-          <button type="button" onClick={onClose} className="w-full py-2 text-slate-600 text-[9px] font-black uppercase">Batal</button>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-function EditPegawaiModal({ db, appId, pegawai, onClose, showToast }) {
-  const [nip, setNip] = useState(pegawai.nip); const [nama, setNama] = useState(pegawai.nama); const [bidang, setBidang] = useState(pegawai.bidang || 'Tata Usaha'); const [jabatan, setJabatan] = useState(pegawai.jabatan || ''); const [loading, setLoading] = useState(false);
-  const handleSubmit = async (e) => { 
-    e.preventDefault(); if (!nip || !nama) return showToast("NIP dan Nama Wajib", "error"); setLoading(true); 
-    try { 
-      await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pegawai', pegawai.id), { nip: nip.replace(/\s+/g, ''), nama, bidang, jabatan }); 
-      showToast("Data Pegawai Diperbarui!"); onClose(); 
-    } catch (error) { showToast("Gagal menyimpan perubahan", "error"); } finally { setLoading(false); } 
-  };
-  return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md">
-      <div className="glass-card p-10 rounded-[3rem] max-w-sm w-full border border-white/10 shadow-2xl animate-in zoom-in">
-        <Edit size={40} className="text-blue-500 mx-auto mb-4" /><h2 className="text-xl font-black mb-6 text-center text-slate-950 dark:text-white">Edit Data Pegawai</h2>
-        <form onSubmit={handleSubmit} className="space-y-4 text-left">
-          <div className="space-y-1"><label className="text-[8px] font-black uppercase text-slate-500 ml-2">NIP</label><input type="text" value={nip} onChange={e=>setNip(e.target.value)} placeholder="NIP" className="w-full px-5 py-3 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold" /></div>
-          <div className="space-y-1"><label className="text-[8px] font-black uppercase text-slate-500 ml-2">Nama Lengkap</label><input type="text" value={nama} onChange={e=>setNama(e.target.value)} placeholder="Nama Lengkap" className="w-full px-5 py-3 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold" /></div>
-          <div className="space-y-1"><label className="text-[8px] font-black uppercase text-slate-500 ml-2">Bidang</label><select value={bidang} onChange={e=>setBidang(e.target.value)} className="w-full p-3 bg-slate-100 dark:bg-slate-900 rounded-2xl font-bold text-xs">{['KALAPAS', 'Tata Usaha', 'KPLP', 'Adm Kamtib', 'Binadikgiatja'].map(b => <option key={b} value={b}>{b}</option>)}</select></div>
-          <div className="space-y-1"><label className="text-[8px] font-black uppercase text-slate-500 ml-2">Jabatan</label><input type="text" value={jabatan} onChange={e=>setJabatan(e.target.value)} placeholder="Jabatan" className="w-full px-5 py-3 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold" /></div>
-          <button type="submit" disabled={loading} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] btn-3d mt-4">Simpan Perubahan</button>
-          <button type="button" onClick={onClose} className="w-full py-2 text-slate-600 text-[9px] font-black uppercase">Batal</button>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-function ConfirmModal({ title, message, onConfirm, onCancel, confirmText = "Ya, Lanjutkan", cancelText = "Batal", isDanger = false }) {
-  return (
-    <div className="fixed inset-0 z-[500] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-sm animate-in fade-in">
-      <div className="glass-card p-8 rounded-[2rem] max-w-sm w-full border border-white/10 shadow-2xl animate-in zoom-in-95">
-        <h3 className={`text-lg font-black mb-2 ${isDanger ? 'text-rose-500' : 'text-blue-500'}`}>{title}</h3>
-        <p className="text-xs font-bold text-slate-400 mb-8 whitespace-pre-wrap leading-relaxed">{message}</p>
-        <div className="flex gap-3">
-          <button onClick={onCancel} className="flex-1 py-3 bg-slate-800 text-slate-300 rounded-xl font-black uppercase text-[10px] hover:bg-slate-700 transition-colors">{cancelText}</button>
-          <button onClick={onConfirm} className={`flex-1 py-3 text-white rounded-xl font-black uppercase text-[10px] btn-3d transition-all ${isDanger ? 'bg-rose-600 shadow-rose-600/30' : 'bg-blue-600 shadow-blue-600/30'}`}>{confirmText}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function PasswordModal({ currentUser, credentials, db, appId, onClose, showToast }) {
-  const [oldPass, setOldPass] = useState(''); const [newPass, setNewPass] = useState(''); const [showPass, setShowPass] = useState(false); const [loading, setLoading] = useState(false);
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!oldPass || !newPass) return showToast("Isi semua bidang", "error");
-    if (currentUser.role === 'admin') {
-       if (oldPass !== 'november') return showToast("Sandi lama admin salah", "error");
-    } else {
-       const cred = credentials.find(c => c.username === currentUser.rawUsername);
-       const current = cred?.password || '123456';
-       if (oldPass !== current) return showToast("Sandi lama salah", "error");
-    }
-    setLoading(true);
+  const handleSave = async (e) => {
+    e.preventDefault(); setLoading(true);
     try {
-      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'credentials', currentUser.rawUsername), {
-        username: currentUser.rawUsername, password: newPass, updatedAt: Date.now()
-      });
-      showToast("Sandi berhasil diubah!"); onClose();
-    } catch (err) { showToast("Gagal mengubah sandi", "error"); } finally { setLoading(false); }
+      await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'config', 'lokasi'), { lat: Number(lat), lng: Number(lng), radius: Number(radius) });
+      showToast("Konfigurasi lokasi berhasil disimpan!"); onClose();
+    } catch(err) {
+      showToast("Gagal menyimpan", "error");
+    } finally {
+      setLoading(false);
+    }
   };
-  return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md">
-      <div className="glass-card p-10 rounded-[3rem] max-w-sm w-full text-center border border-white/10 shadow-2xl animate-in zoom-in">
-        <Key size={40} className="text-blue-500 mx-auto mb-4" /><h2 className="text-xl font-black mb-6 text-slate-950 dark:text-white">Ubah Password</h2>
-        <form onSubmit={handleSubmit} className="space-y-4 text-left">
-          <div className="space-y-1"><label className="text-[8px] font-black uppercase text-slate-500 ml-2">Sandi Lama</label><input type={showPass?"text":"password"} value={oldPass} onChange={e=>setOldPass(e.target.value)} className="w-full px-5 py-3 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold" /></div>
-          <div className="space-y-1"><label className="text-[8px] font-black uppercase text-slate-500 ml-2">Sandi Baru</label><input type={showPass?"text":"password"} value={newPass} onChange={e=>setNewPass(e.target.value)} className="w-full px-5 py-3 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold" /></div>
-          <label className="flex items-center gap-2 cursor-pointer mt-2 pl-2"><input type="checkbox" onChange={()=>setShowPass(!showPass)} checked={showPass} className="w-4 h-4 rounded" /><span className="text-[10px] font-bold text-slate-500">Tampilkan Sandi</span></label>
-          <button type="submit" disabled={loading} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] btn-3d mt-4">Simpan Sandi</button>
-          <button type="button" onClick={onClose} className="w-full py-2 text-slate-600 text-[9px] font-black uppercase">Batal</button>
-        </form>
-      </div>
-    </div>
-  );
-}
 
-function AdminEditPasswordModal({ targetUser, credentials, db, appId, onClose, showToast }) {
-  const [newPass, setNewPass] = useState('123456'); const [showPass, setShowPass] = useState(false); const [confirmDialog, setConfirmDialog] = useState(null);
-  const handleUpdateClick = (e) => { e.preventDefault(); if (!newPass) return; setConfirmDialog({ title: "Konfirmasi Admin", message: `Ubah sandi untuk ${targetUser.nama}?`, isDanger: true, onConfirm: async () => { setConfirmDialog(null); try { await setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'credentials', targetUser.nip), { username: targetUser.nip, password: newPass, updatedAt: Date.now() }); showToast("Sandi diperbarui!"); onClose(); } catch (err) {} } }); };
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center p-6 bg-slate-950/90 backdrop-blur-md">
-      <div className="glass-card p-10 rounded-[3rem] max-w-sm w-full text-center border border-white/10 shadow-2xl animate-in zoom-in">
-        <Lock size={40} className="text-amber-500 mx-auto mb-4" /><h2 className="text-xl font-black mb-8 text-slate-950 dark:text-white">Akses Admin</h2>
-        <form onSubmit={handleUpdateClick} className="space-y-4 text-left">
-          <div className="relative"><input type={showPass?"text":"password"} value={newPass} onChange={e=>setNewPass(e.target.value)} className="w-full pl-5 pr-12 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold" /><button type="button" onClick={()=>setShowPass(!showPass)} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400">{showPass ? <EyeOff size={16}/> : <Eye size={16}/>}</button></div>
-          <button type="submit" className="w-full py-5 bg-amber-500 text-white rounded-2xl font-black uppercase text-[10px] btn-3d">Simpan Sandi Baru</button>
-          <button type="button" onClick={onClose} className="w-full py-2 text-slate-600 text-[9px] font-black uppercase">Batal</button>
+      <div className="glass-card p-10 rounded-[3rem] max-w-sm w-full border border-white/10 shadow-2xl animate-in zoom-in">
+        <MapPin size={40} className="text-emerald-500 mx-auto mb-4" />
+        <h2 className="text-xl font-black mb-6 text-center text-slate-950 dark:text-white">Atur Lokasi Presensi</h2>
+        <form onSubmit={handleSave} className="space-y-4">
+          <div className="space-y-1">
+            <label className="text-[9px] font-black uppercase text-slate-500 ml-2">Latitude</label>
+            <input type="number" step="any" value={lat} onChange={e=>setLat(e.target.value)} className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold" required />
+          </div>
+          <div className="space-y-1">
+            <label className="text-[9px] font-black uppercase text-slate-500 ml-2">Longitude</label>
+            <input type="number" step="any" value={lng} onChange={e=>setLng(e.target.value)} className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold" required />
+          </div>
+          
+          <button 
+            type="button" 
+            onClick={handleGetMyLocation} 
+            disabled={isFetchingGps} 
+            className="w-full py-3 bg-slate-200 dark:bg-slate-800 text-blue-600 dark:text-blue-400 rounded-xl font-black uppercase text-[9px] mt-2 flex items-center justify-center gap-2 hover:bg-slate-300 dark:hover:bg-slate-700 transition-colors"
+          >
+            <MapPin size={14} /> {isFetchingGps ? 'Mendapatkan Koordinat...' : 'Ambil Titik Lokasi Saya Saat Ini'}
+          </button>
+
+          <div className="space-y-1 mt-4">
+            <label className="text-[9px] font-black uppercase text-slate-500 ml-2">Radius Maksimal (Meter)</label>
+            <input type="number" value={radius} onChange={e=>setRadius(e.target.value)} className="w-full px-5 py-4 bg-slate-100 dark:bg-slate-900 rounded-2xl text-xs font-bold" required />
+          </div>
+          <button type="submit" disabled={loading} className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black uppercase text-[10px] mt-4 btn-3d">{loading ? 'Menyimpan...' : 'Simpan Konfigurasi'}</button>
+          <button type="button" onClick={onClose} className="w-full py-2 text-slate-600 text-[9px] font-black uppercase mt-2">Batal</button>
         </form>
       </div>
-      {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
     </div>
   );
 }
