@@ -754,8 +754,8 @@ function AbsenView({ currentUser, currentTime, allHistory, pegawaiList, location
         // 3. Catat lokasi akurat ke histori
         locationHistoryRef.current.push({lat: latitude, lng: longitude, time: now});
 
-        // 4. Update peta dan jarak
-        setLocation({ lat: latitude, longitude }); setDist(getDistanceInKm(latitude, longitude, locationConfig.lat, locationConfig.lng));
+        // 4. Update peta dan jarak (PERBAIKAN BUG WHITE SCREEN: Ubah longitude menjadi lng: longitude)
+        setLocation({ lat: latitude, lng: longitude }); setDist(getDistanceInKm(latitude, longitude, locationConfig.lat, locationConfig.lng));
       },
       (err) => { 
         if (err.code === err.PERMISSION_DENIED) showToast("Izin GPS ditolak oleh browser Anda!", "error");
