@@ -101,6 +101,39 @@ const getMinutesDiff = (limitH, limitM, actualH, actualM) => {
   return (actualH * 60 + actualM) - (limitH * 60 + limitM);
 };
 
+// ==========================================
+// FUNGSI HELPER GLOBAL & FACE RECOGNITION AI
+// ==========================================
+let faceApiLoaded = false;
+let faceModelsLoaded = false;
+const MODEL_URL = 'https://justadudewhohacks.github.io/face-api.js/models';
+
+const initFaceApi = async () => {
+  if (faceModelsLoaded) return window.faceapi;
+  
+  if (!faceApiLoaded) {
+    await new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js';
+      script.onload = () => { faceApiLoaded = true; resolve(); };
+      script.onerror = reject;
+      document.head.appendChild(script);
+    });
+  }
+  
+  const faceapi = window.faceapi;
+  // Memuat model AI untuk deteksi wajah, landmark, biometrik, dan Ekspresi
+  await Promise.all([
+    faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+    faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL),
+    faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
+    faceapi.nets.faceExpressionNet.loadFromUri(MODEL_URL)
+  ]);
+  
+  faceModelsLoaded = true;
+  return faceapi;
+};
+
 const loadXlsxScript = () => new Promise((resolve, reject) => {
   if (window.XLSX) return resolve(window.XLSX);
   const script = document.createElement('script');
@@ -243,11 +276,15 @@ export default function App() {
     const syncTime = async () => {
       const providers = ['https://timeapi.io/api/Time/current/zone?timeZone=Asia/Makassar', 'https://worldtimeapi.org/api/timezone/Asia/Makassar'];
       try {
-        const fastestResponse = await Promise.any(providers.map(url => fetch(url, { cache: 'no-cache' }).then(res => { if (!res.ok) throw new Error(); return res.json(); })));
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // Batas maksimal sinkronisasi 5 detik
+        const fastestResponse = await Promise.any(providers.map(url => fetch(url, { cache: 'no-cache', signal: controller.signal }).then(res => { if (!res.ok) throw new Error(); return res.json(); })));
+        clearTimeout(timeoutId);
         const serverDate = new Date(fastestResponse.dateTime || fastestResponse.datetime);
         setSyncRefs({ server: serverDate.getTime(), perf: performance.now() });
         setIsTimeSynced(true);
       } catch (err) { 
+        // Fallback ke waktu lokal jika API gagal (mencegah pegawai tidak bisa absen karena masalah jaringan/CORS)
         setSyncRefs({ server: Date.now(), perf: performance.now() });
         setIsTimeSynced(true);
       }
@@ -359,7 +396,7 @@ export default function App() {
       ) : (
         <MainDashboard 
           currentUser={currentUser} pegawaiList={pegawaiList} allHistory={allHistory} credentials={credentials} locationConfig={locationConfig}
-          passRequests={passRequests} messages={messages} jadwalList={jadwalList} showToast={showToast} isDarkMode={isDarkMode} toggleDarkMode={() => setIsDarkMode(!isDarkMode)}
+          passRequests={passRequests} messages={messages} showToast={showToast} isDarkMode={isDarkMode} toggleDarkMode={() => setIsDarkMode(!isDarkMode)}
           onLogout={() => { localStorage.removeItem('absensiUser'); setCurrentUser(null); showToast("Berhasil keluar."); }}
           appId={appId} db={db} currentTime={currentTime} isTimeSynced={isTimeSynced} pengumumanData={pengumumanData}
         />
@@ -468,7 +505,7 @@ function ForgotPasswordModal({ db, appId, onClose, showToast, pegawaiList }) {
 // ==========================================
 // DASHBOARD UTAMA
 // ==========================================
-function MainDashboard({ currentUser, pegawaiList, allHistory, credentials, locationConfig, passRequests, messages, showToast, isDarkMode, toggleDarkMode, onLogout, appId, db, currentTime, isTimeSynced, timeAnomaly, pengumumanData }) {
+function MainDashboard({ currentUser, pegawaiList, allHistory, credentials, locationConfig, passRequests, messages, showToast, isDarkMode, toggleDarkMode, onLogout, appId, db, currentTime, isTimeSynced, pengumumanData }) {
   const [activeTab, setActiveTab] = useState(currentUser.role === 'admin' ? 'rekap' : 'absen');
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [showPengumumanModal, setShowPengumumanModal] = useState(false);
@@ -525,7 +562,7 @@ function MainDashboard({ currentUser, pegawaiList, allHistory, credentials, loca
         <div className="p-6 md:p-10 max-w-6xl mx-auto">
           <header className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6 mb-8">
             <div>
-              <h1 className="text-4xl font-black tracking-tighter text-slate-950 dark:text-white">{activeTab === 'absen' ? 'Presensi' : (activeTab === 'pesan' ? 'Pesan Masuk' : menuItems.find(m => m.id === activeTab)?.label || activeTab)}</h1>
+              <h1 className="text-4xl font-black tracking-tighter text-slate-950 dark:text-white">{activeTab === 'absen' ? 'Pusat Presensi' : (activeTab === 'pesan' ? 'Pesan Masuk' : menuItems.find(m => m.id === activeTab)?.label || activeTab)}</h1>
               <p className="text-[10px] font-bold uppercase tracking-widest text-slate-700 dark:text-slate-500 mt-2">Pegawai: {currentUser.username} <span className="mx-2 opacity-30">|</span> Unit: Kalabahi</p>
             </div>
 
@@ -551,7 +588,7 @@ function MainDashboard({ currentUser, pegawaiList, allHistory, credentials, loca
           </div>
 
           <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-            {activeTab === 'absen' && <AbsenView currentUser={currentUser} currentTime={currentTime} allHistory={allHistory} pegawaiList={pegawaiList} locationConfig={locationConfig} showToast={showToast} appId={appId} db={db} isSynced={isTimeSynced && !timeAnomaly} />}
+            {activeTab === 'absen' && <AbsenView currentUser={currentUser} currentTime={currentTime} allHistory={allHistory} pegawaiList={pegawaiList} locationConfig={locationConfig} showToast={showToast} appId={appId} db={db} isSynced={isTimeSynced} />}
             {activeTab === 'riwayat' && <HistoryList history={currentUser.role === 'admin' ? allHistory : allHistory.filter(h => h.username === currentUser.rawUsername)} currentUser={currentUser} locationConfig={locationConfig} db={db} appId={appId} showToast={showToast} />}
             {activeTab === 'rekap' && <RekapView currentUser={currentUser} allHistory={allHistory} pegawaiList={pegawaiList} waConfig={waConfig} setWaConfig={(cfg) => { setWaConfig(cfg); localStorage.setItem('waAutoConfig', JSON.stringify(cfg)); showToast("Pengaturan WA Laporan Otomatis Tersimpan!"); }} showToast={showToast} db={db} appId={appId} />}
             {activeTab === 'kelola' && <KelolaView currentUser={currentUser} pegawaiList={pegawaiList} passRequests={passRequests} locationConfig={locationConfig} showToast={showToast} db={db} appId={appId} credentials={credentials} />}
@@ -686,45 +723,108 @@ function AbsenView({ currentUser, currentTime, allHistory, pegawaiList, location
 
   const stopCamera = () => { if (videoRef.current && videoRef.current.srcObject) videoRef.current.srcObject.getTracks().forEach(t => t.stop()); setIsCameraActive(false); };
 
-  const processLivenessAndCapture = () => {
+  const processLivenessAndCapture = async () => {
     if (!canBypassGps && isFakeGpsBlocked) return showToast("Akses Kamera Ditolak (Indikasi Fake GPS)", "error");
+    
+    const video = videoRef.current; 
+    const canvas = canvasRef.current; 
+    if (!video || !canvas) return;
+    
     setIsScanning(true);
-    setLivenessStatus('Memindai wajah...');
+    setLivenessStatus('Memuat AI... Harap hadap kamera.');
 
-    const video = videoRef.current; const canvas = canvasRef.current; if (!video || !canvas) return;
-    const isDesktop = window.innerWidth >= 768; const vW = video.videoWidth; const vH = video.videoHeight;
-    if (isDesktop) { canvas.width = 640; canvas.height = 360; } else { canvas.width = 480; canvas.height = 640; }
-    
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const frame1 = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    try {
+      const faceapi = await initFaceApi();
+      setLivenessStatus('AI Aktif! Tatap kamera dengan WAJAH DATAR...');
 
-    setTimeout(() => {
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-      const frame2 = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+      let livenessStep = 0; // 0: Wajah Netral, 1: Tersenyum, 2: Lolos Liveness
+      let attempts = 0;
+      const maxAttempts = 300; // Batas waktu 15 detik (50ms * 300)
+      
+      const checkFrame = async () => {
+        if (attempts > maxAttempts) {
+          setIsScanning(false); setLivenessStatus('');
+          return showToast("ABSEN DITOLAK: Waktu habis. Pastikan ikuti instruksi ekspresi wajah untuk membuktikan Anda bukan foto!", "error");
+        }
 
-      let diffCount = 0;
-      for (let i = 0; i < frame1.length; i += 4) {
-        const diff = Math.abs(frame1[i] - frame2[i]) + Math.abs(frame1[i+1] - frame2[i+1]) + Math.abs(frame1[i+2] - frame2[i+2]);
-        if (diff > 50) diffCount++;
-      }
-      const motionPercent = (diffCount / (frame1.length / 4)) * 100;
+        const detection = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 }))
+          .withFaceLandmarks()
+          .withFaceExpressions() // Menggunakan deteksi ekspresi
+          .withFaceDescriptor();
 
-      if (motionPercent < 0.05) { 
-        setIsScanning(false); setLivenessStatus('');
-        showToast("Liveness Gagal: Objek statis/Foto palsu terdeteksi!", "error");
-      } else {
-        setLivenessStatus('Mencocokkan Biometrik...');
-        
-        setTimeout(() => {
-          setLivenessStatus('Kecocokan 98% - Wajah Terverifikasi!');
-          
-          setTimeout(() => {
-            const targetRatio = canvas.width / canvas.height; const sourceRatio = vW / vH;
+        if (detection) {
+          const happyScore = detection.expressions.happy;
+          const neutralScore = detection.expressions.neutral;
+
+          // 1. Deteksi Liveness Interaktif (Neutral -> Happy) untuk menggagalkan foto
+          if (livenessStep === 0) {
+             if (neutralScore > 0.6 && happyScore < 0.1) {
+                 livenessStep = 1;
+                 setLivenessStatus('Bagus! Sekarang TERSENYUM LEBAR 😃...');
+             }
+          } else if (livenessStep === 1) {
+             if (happyScore > 0.7) {
+                 livenessStep = 2; // Sukses! Wajah terbukti hidup karena ekspresi berubah
+             }
+          }
+
+          if (livenessStep === 2) {
+            setLivenessStatus('Menganalisis Identitas Face ID...');
+            
+            // 2. Validasi Jarak/Ukuran Wajah (Anti menempelkan layar HP ke kamera)
+            const faceArea = detection.detection.box.width * detection.detection.box.height;
+            const frameArea = video.videoWidth * video.videoHeight;
+            const faceRatio = faceArea / frameArea;
+
+            if (!canBypassGps && faceRatio < 0.08) {
+               setIsScanning(false); setLivenessStatus('');
+               return showToast("ABSEN DITOLAK: Wajah terlalu jauh atau terindikasi layar HP. Dekatkan wajah Anda!", "error");
+            }
+
+            // 3. Pencocokan Wajah dengan Database (Multi-Angle)
+            if (!canBypassGps) {
+               const isFaceRegistered = currentUserData?.faceRegistered;
+               if (!isFaceRegistered || (!currentUserData.faceDescriptor && !currentUserData.faceDescriptors)) {
+                   setIsScanning(false); setLivenessStatus('');
+                   return showToast("AKSES DITOLAK! Wajah Anda belum terdaftar di sistem. Hubungi Admin.", "error");
+               }
+               
+               const currentDescriptor = detection.descriptor;
+               let minDistance = 1.0;
+               
+               // Cek kecocokan dengan seluruh angle yang didaftarkan (Pilih jarak terdekat/paling mirip)
+               const descriptorsToCheck = currentUserData.faceDescriptors || [currentUserData.faceDescriptor];
+               for (const d of descriptorsToCheck) {
+                   if (!d) continue;
+                   const parsedData = typeof d === 'string' ? JSON.parse(d) : d;
+                   const savedDesc = new Float32Array(parsedData);
+                   const distance = faceapi.euclideanDistance(savedDesc, currentDescriptor);
+                   if (distance < minDistance) minDistance = distance;
+               }
+               
+               // Keketatan sangat tinggi (0.45)
+               if (minDistance > 0.45) {
+                   setIsScanning(false); setLivenessStatus('');
+                   return showToast(`ABSENSI DITOLAK! Wajah tidak cocok dengan identitas NIP: ${currentUser.rawUsername}.`, "error");
+               }
+            }
+
+            // Lolos Semua Validasi
+            setLivenessStatus('Wajah Valid Terverifikasi!');
+            
+            const isDesktop = window.innerWidth >= 768; 
+            canvas.width = isDesktop ? 640 : 480; 
+            canvas.height = isDesktop ? 360 : 640;
+            const ctx = canvas.getContext('2d', { willReadFrequently: true });
+            
+            const targetRatio = canvas.width / canvas.height; 
+            const sourceRatio = video.videoWidth / video.videoHeight;
             let sx, sy, sWidth, sHeight;
-            if (sourceRatio > targetRatio) { sHeight = vH; sWidth = vH * targetRatio; sx = (vW - sWidth) / 2; sy = 0; } 
-            else { sWidth = vW; sHeight = vW / targetRatio; sx = 0; sy = (vH - sHeight) / 2; }
+            if (sourceRatio > targetRatio) { 
+              sHeight = video.videoHeight; sWidth = video.videoHeight * targetRatio; sx = (video.videoWidth - sWidth) / 2; sy = 0; 
+            } else { 
+              sWidth = video.videoWidth; sHeight = video.videoWidth / targetRatio; sx = 0; sy = (video.videoHeight - sHeight) / 2; 
+            }
             
             ctx.save();
             ctx.translate(canvas.width, 0);
@@ -732,11 +832,24 @@ function AbsenView({ currentUser, currentTime, allHistory, pegawaiList, location
             ctx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, canvas.width, canvas.height);
             ctx.restore();
 
-            setPhoto(canvas.toDataURL('image/jpeg', 0.8)); setIsScanning(false); setLivenessStatus(''); stopCamera();
-          }, 600);
-        }, 800);
-      }
-    }, 1200); 
+            setPhoto(canvas.toDataURL('image/jpeg', 0.8)); 
+            setIsScanning(false); 
+            setLivenessStatus(''); 
+            stopCamera();
+            return; 
+          }
+        }
+        
+        attempts++;
+        setTimeout(checkFrame, 50);
+      };
+
+      checkFrame();
+
+    } catch (err) {
+      setIsScanning(false); setLivenessStatus('');
+      showToast("Terjadi kesalahan inisialisasi AI", "error");
+    }
   };
 
   const toggleLocationTracking = () => {
@@ -788,7 +901,7 @@ function AbsenView({ currentUser, currentTime, allHistory, pegawaiList, location
   };
 
   const submitAbsenClick = () => {
-    if (!auth.currentUser) return showToast("Sesi habis, harap login ulang", "error");
+    if (!currentUser) return showToast("Sesi habis, harap login ulang", "error");
     
     // Wajib untuk Pegawai (Selain Admin / Non-bypass)
     if (!canBypassGps) {
@@ -1096,7 +1209,7 @@ function AbsenView({ currentUser, currentTime, allHistory, pegawaiList, location
             )}
 
             {!canBypassGps && (
-              <button onClick={toggleLocationTracking} className={`w-full mt-6 py-4 glass-card rounded-2xl font-black text-[9px] uppercase btn-3d transition-all shadow-md ${isTrackingLocation ? 'bg-slate-100 text-rose-600 dark:bg-slate-950 dark:text-rose-500' : 'bg-white text-slate-900 dark:bg-slate-800 dark:text-white'}`}>
+              <button type="button" onClick={toggleLocationTracking} className={`w-full mt-6 py-4 glass-card rounded-2xl font-black text-[9px] uppercase btn-3d transition-all shadow-md ${isTrackingLocation ? 'bg-slate-100 text-rose-600 dark:bg-slate-950 dark:text-rose-500' : 'bg-white text-slate-900 dark:bg-slate-800 dark:text-white'}`}>
                 {isTrackingLocation ? 'Hentikan Lacak GPS' : 'Mulai Lacak GPS Real-Time (Peta)'}
               </button>
             )}
@@ -1106,7 +1219,7 @@ function AbsenView({ currentUser, currentTime, allHistory, pegawaiList, location
             <select value={absenType} onChange={e => setAbsenType(e.target.value)} className="w-full md:flex-1 p-4 bg-slate-100 dark:bg-slate-900 border-none rounded-2xl font-black text-xs text-center outline-none cursor-pointer text-slate-950 dark:text-white shadow-inner">
               {['Masuk', 'Keluar', 'Lepas Piket', 'Sakit', 'Cuti', 'Dinas Luar', 'BKO'].map(t => <option key={t} value={t}>{t}</option>)}
             </select>
-            <button disabled={loading} onClick={submitAbsenClick} className={`w-full md:w-auto px-10 py-5 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] btn-3d shadow-xl shadow-blue-600/30 transition-all active:scale-95 ${(!canBypassGps && !photo) || (!canBypassGps && !isSynced) ? 'opacity-70' : 'opacity-100'}`}>
+            <button type="button" disabled={loading} onClick={submitAbsenClick} className={`w-full md:w-auto px-10 py-5 bg-blue-600 text-white rounded-2xl font-black uppercase text-[10px] btn-3d shadow-xl shadow-blue-600/30 transition-all active:scale-95 ${(!canBypassGps && !photo) || (!canBypassGps && !isSynced) ? 'opacity-70' : 'opacity-100'}`}>
               {loading ? <Loader2 className="animate-spin mx-auto" size={18}/> : `Lapor ${absenType}`}
             </button>
           </div>
@@ -1214,6 +1327,7 @@ function AbsenView({ currentUser, currentTime, allHistory, pegawaiList, location
            </table>
           </div>
         </div>
+        {confirmDialog && <ConfirmModal {...confirmDialog} onCancel={() => setConfirmDialog(null)} />}
       </div>
     );
 }
@@ -2510,16 +2624,47 @@ function PegawaiModal({ db, appId, editData, onClose, showToast }) {
     setIsCameraOpen(false);
   };
 
-  const handleScanFace = () => {
-    setScanStatus('Memindai struktur wajah...');
-    setTimeout(() => {
-      setScanStatus('Mengekstrak data biometrik...');
-      setTimeout(() => {
-        setScanStatus('Berhasil didaftarkan!');
-        setFormData({ ...formData, faceRegistered: true });
-        setTimeout(() => { stopCamera(); setScanStatus(''); }, 1000);
-      }, 1500);
-    }, 1500);
+  const handleScanFaceMulti = async () => {
+    setScanStatus('Memuat AI (Harap Tunggu)...');
+    try {
+      const faceapi = await initFaceApi();
+      const video = videoRef.current;
+      if (!video) return;
+      
+      const stepLabels = ['Lurus Ke Depan', 'Tengok Kiri', 'Tengok Kanan', 'Tunduk Sedikit Ke Bawah'];
+      const descriptors = [];
+
+      for (let i = 0; i < stepLabels.length; i++) {
+        setScanStatus(`Langkah ${i + 1}/4: Hadap ${stepLabels[i]} & Tahan...`);
+        
+        // Beri jeda 2.5 detik per langkah agar pegawai bisa mengatur pose
+        await new Promise(resolve => setTimeout(resolve, 2500));
+        
+        if (!videoRef.current) return; // Jika modal tiba-tiba ditutup
+        
+        const detection = await faceapi.detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
+                                       .withFaceLandmarks()
+                                       .withFaceDescriptor();
+                                       
+        if (!detection) {
+            setScanStatus('');
+            return showToast(`Wajah tidak terdeteksi saat pose ${stepLabels[i]}. Pastikan wajah ada di dalam garis panduan. Ulangi.`, "error");
+        }
+        
+        // Perbaikan: Ubah format array menjadi JSON string karena Firebase Firestore menolak nested array (array di dalam array)
+        descriptors.push(JSON.stringify(Array.from(detection.descriptor)));
+      }
+      
+      setFormData({ ...formData, faceRegistered: true, faceDescriptors: descriptors });
+      setScanStatus('Berhasil didaftarkan 4 Sudut (Multi-Angle)!');
+      
+      setTimeout(() => { stopCamera(); setScanStatus(''); }, 2000);
+
+    } catch (err) {
+      setScanStatus('');
+      showToast("Terjadi kesalahan pemindaian wajah", "error");
+      console.error(err);
+    }
   };
 
   useEffect(() => { return () => stopCamera(); }, []);
@@ -2528,10 +2673,16 @@ function PegawaiModal({ db, appId, editData, onClose, showToast }) {
     e.preventDefault(); setLoading(true);
     try {
       const cleanData = { ...formData, nip: formData.nip.trim(), faceRegistered: formData.faceRegistered || false };
+      if (formData.faceDescriptor) cleanData.faceDescriptor = formData.faceDescriptor; // Legacy dukungan data lama
+      if (formData.faceDescriptors) cleanData.faceDescriptors = formData.faceDescriptors;
+      
       if (editData) await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'pegawai', editData.id), cleanData);
       else await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'pegawai'), cleanData);
       showToast(editData ? "Data diperbarui!" : "Pegawai ditambahkan!"); onClose();
-    } catch(err) { showToast("Gagal menyimpan", "error"); } finally { setLoading(false); }
+    } catch(err) { 
+      console.error(err);
+      showToast("Gagal menyimpan", "error"); 
+    } finally { setLoading(false); }
   };
 
   return (
@@ -2558,24 +2709,29 @@ function PegawaiModal({ db, appId, editData, onClose, showToast }) {
             </div>
             {!isCameraOpen ? (
               <button type="button" onClick={startCamera} className="w-full py-4 bg-slate-200 dark:bg-slate-800 text-blue-600 dark:text-blue-400 rounded-xl text-[9px] font-black uppercase flex items-center justify-center gap-2 transition-colors hover:bg-slate-300 dark:hover:bg-slate-700">
-                <Scan size={14}/> {formData.faceRegistered ? 'Daftar Ulang Wajah' : 'Daftarkan Wajah Sekarang'}
+                <Scan size={14}/> {formData.faceRegistered ? 'Daftar Ulang Wajah (4 Arah)' : 'Daftarkan Wajah (4 Arah)'}
               </button>
             ) : (
               <div className="relative aspect-square rounded-xl overflow-hidden bg-slate-950 border-2 border-blue-500 shadow-inner">
                 <video ref={videoRef} autoPlay playsInline muted className="w-full h-full object-cover scale-x-[-1]" />
+                
+                {/* Kotak Panduan Siluet Wajah */}
+                <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center z-10 pb-8">
+                   <div className="w-32 h-44 border-4 border-emerald-400 border-dashed rounded-[50%] animate-pulse opacity-70 shadow-2xl"></div>
+                   <p className="text-[8px] font-black text-white mt-4 bg-slate-900/50 px-2 py-1 rounded">Posisikan wajah di dalam garis</p>
+                </div>
+
                 {scanStatus && (
-                   <div className="absolute inset-0 bg-blue-600/20 backdrop-blur-sm flex items-center justify-center z-10">
-                     <p className="bg-blue-600 text-white px-4 py-2 rounded-full text-[10px] font-black uppercase tracking-widest shadow-xl animate-pulse text-center">{scanStatus}</p>
+                   <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20 w-[90%] flex flex-col gap-2">
+                     <p className="bg-blue-600/90 backdrop-blur-md text-white px-4 py-3 rounded-xl text-[10px] font-black uppercase tracking-widest shadow-xl text-center border border-white/20">{scanStatus}</p>
                    </div>
                 )}
                 {!scanStatus && (
-                   <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-10 w-[90%] flex gap-2">
-                     <button type="button" onClick={handleScanFace} className="flex-1 py-3 bg-blue-600 text-white rounded-xl text-[9px] font-black uppercase shadow-xl btn-3d">Pindai</button>
+                   <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-20 w-[90%] flex gap-2">
+                     <button type="button" onClick={handleScanFaceMulti} className="flex-1 py-3 bg-blue-600 text-white rounded-xl text-[9px] font-black uppercase shadow-xl btn-3d">Mulai Pindai 4 Langkah</button>
                      <button type="button" onClick={stopCamera} className="py-3 px-4 bg-rose-600 text-white rounded-xl text-[9px] font-black uppercase shadow-xl hover:bg-rose-700"><X size={14}/></button>
                    </div>
                 )}
-                {/* Visual Scanner Box */}
-                {!scanStatus && <div className="absolute inset-8 border-2 border-white/50 border-dashed rounded-lg pointer-events-none opacity-50"></div>}
               </div>
             )}
           </div>
